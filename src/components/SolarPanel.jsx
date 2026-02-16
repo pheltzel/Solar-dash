@@ -17,13 +17,13 @@ export default function SolarPanel() {
   const totalSolar = eg4Data.inverters.reduce((s, i) => s + i.solarPower, 0);
   const totalDailyProd = eg4Data.inverters.reduce((s, i) => s + i.dailyProduction, 0);
 
-  const batteryColors = ['#22c55e', '#4ade80', '#86efac', '#bbf7d0'];
+  const batteryColors = ['#22c55e', '#4ade80', '#86efac', '#bbf7d0', '#a7f3d0', '#6ee7b7'];
 
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-white">Solar & Battery</h2>
-        <p className="text-slate-400 text-sm mt-1">EG4 inverter and battery bank status</p>
+        <p className="text-slate-400 text-sm mt-1">EG4 12000XP inverters &bull; 6 batteries &bull; 30 kWh</p>
       </div>
 
       {/* Inverter Cards */}
@@ -53,8 +53,10 @@ export default function SolarPanel() {
                 color={inv.gridPower > 0 ? 'text-grid-red' : 'text-battery-green'} />
               <Stat label="PV Voltage" value={`${inv.pvVoltage} V`} color="text-slate-300" />
               <Stat label="PV Current" value={`${inv.pvCurrent} A`} color="text-slate-300" />
+              <Stat label="MPPT 1" value={`${inv.mppt1Power} kW`} color="text-solar-yellow" />
+              <Stat label="MPPT 2" value={`${inv.mppt2Power} kW`} color="text-solar-yellow" />
               <Stat label="Daily Yield" value={`${inv.dailyProduction} kWh`} color="text-solar-yellow" />
-              <Stat label="Mode" value={inv.mode} color="text-slate-300" />
+              <Stat label="Mode" value={inv.workingMode} color="text-slate-300" />
             </div>
           </div>
         ))}
@@ -87,7 +89,7 @@ export default function SolarPanel() {
           <Battery className="w-5 h-5 text-battery-green" />
           <h3 className="text-lg font-semibold text-white">Battery Banks</h3>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {eg4Data.batteries.map((bat, i) => (
             <div key={bat.id} className="bg-slate-900/50 rounded-lg p-4 border border-slate-700/30">
               <div className="flex items-center justify-between mb-3">

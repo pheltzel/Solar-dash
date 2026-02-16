@@ -1,8 +1,9 @@
-import { Sun, Zap, Thermometer, DollarSign, Lightbulb, LayoutDashboard } from 'lucide-react';
+import { Sun, Zap, Thermometer, DollarSign, Lightbulb, LayoutDashboard, Settings } from 'lucide-react';
 
 const navItems = [
   { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
   { id: 'solar', label: 'Solar & Battery', icon: Sun },
+  { id: 'config', label: '12000XP Config', icon: Settings },
   { id: 'energy', label: 'Energy Monitor', icon: Zap },
   { id: 'hvac', label: 'HVAC / Ecobee', icon: Thermometer },
   { id: 'utility', label: 'Utility & Costs', icon: DollarSign },
@@ -51,8 +52,8 @@ export default function Sidebar({ activeTab, onTabChange }) {
             <div className="w-2 h-2 rounded-full bg-battery-green animate-pulse" />
             <span className="text-xs text-slate-300 font-medium">System Online</span>
           </div>
-          <p className="text-xs text-slate-500">2 inverters connected</p>
-          <p className="text-xs text-slate-500">4 batteries healthy</p>
+          <p className="text-xs text-slate-500">2x EG4 12000XP</p>
+          <p className="text-xs text-slate-500">6 batteries &bull; 30 kWh</p>
         </div>
       </div>
     </aside>

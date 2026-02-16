@@ -47,7 +47,7 @@ export default function Dashboard() {
           title="Battery"
           value={avgBattery}
           unit="%"
-          subtitle="4 banks healthy"
+          subtitle="6 banks &bull; 30 kWh total"
           icon={Battery}
           color="text-battery-green"
         />

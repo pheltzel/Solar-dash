@@ -7,10 +7,12 @@ import EnergyMonitor from './components/EnergyMonitor';
 import ThermostatPanel from './components/ThermostatPanel';
 import UtilityPanel from './components/UtilityPanel';
 import OptimizationPanel from './components/OptimizationPanel';
+import InverterConfig from './components/InverterConfig';
 
 const panels = {
   dashboard: Dashboard,
   solar: SolarPanel,
+  config: InverterConfig,
   energy: EnergyMonitor,
   hvac: ThermostatPanel,
   utility: UtilityPanel,
