@@ -1,10 +1,15 @@
 import { Sun, Battery, Gauge, Thermometer, Activity, ArrowUpDown } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { eg4Data, generateTimeSeriesData } from '../data/mockData';
+import { eg4Data as mockEg4, generateTimeSeriesData } from '../data/mockData';
 import { useMemo } from 'react';
+import { useEg4System } from '../hooks/useApi';
 
 export default function SolarPanel() {
+  const { data: eg4Live } = useEg4System();
   const timeSeriesData = useMemo(() => generateTimeSeriesData(24), []);
+
+  // Use live data when available, mock otherwise
+  const eg4Data = eg4Live ? transformEg4Live(eg4Live) : mockEg4;
 
   const batteryData = eg4Data.batteries.map(b => ({
     name: b.id,
@@ -154,4 +159,71 @@ function Stat({ label, value, color }) {
       <p className={`text-sm font-semibold ${color}`}>{value}</p>
     </div>
   );
+}
+
+// Transform live EG4/SolarMan API data into the shape our components expect
+function transformEg4Live(live) {
+  const getValue = (dataList, ...keys) => {
+    for (const key of keys) {
+      const item = (dataList || []).find(d => d.key?.includes(key));
+      if (item) return Number(item.value);
+    }
+    return 0;
+  };
+
+  const inverters = (live.inverters || []).map((inv, i) => ({
+    id: inv.deviceSn || `EG4-${String(i + 1).padStart(2, '0')}`,
+    name: inv.deviceName || `Inverter ${i + 1}`,
+    status: inv.connectStatus === 1 ? 'Online' : 'Offline',
+    firmware: '',
+    solarPower: getValue(inv.dataList, 'Ppv', 'DPi_t1'),
+    batteryPower: getValue(inv.dataList, 'Pbat', 'Pb_t1'),
+    gridPower: getValue(inv.dataList, 'Pgrid', 'Pg_t1'),
+    loadPower: getValue(inv.dataList, 'Pload', 'Pl_t1'),
+    batterySOC: getValue(inv.dataList, 'SOC'),
+    pvVoltage: getValue(inv.dataList, 'Vpv', 'Upv'),
+    pvCurrent: getValue(inv.dataList, 'Ipv'),
+    mppt1Power: getValue(inv.dataList, 'MPPT1', 'Ppv1'),
+    mppt2Power: getValue(inv.dataList, 'MPPT2', 'Ppv2'),
+    dailyProduction: getValue(inv.dataList, 'E_today', 'Etdy'),
+    totalProduction: getValue(inv.dataList, 'E_total', 'Et_ge'),
+    workingMode: 'Self-Consumption',
+  }));
+
+  // Battery data — try to extract from inverter data lists
+  const batteries = [];
+  for (const inv of (live.inverters || [])) {
+    for (let b = 1; b <= 6; b++) {
+      const soc = getValue(inv.dataList, `B${b}_SOC`, `bat${b}_soc`);
+      if (soc > 0) {
+        batteries.push({
+          id: `Bank-${batteries.length + 1}`,
+          soc,
+          voltage: getValue(inv.dataList, `B${b}_V`, `bat${b}_voltage`),
+          current: getValue(inv.dataList, `B${b}_I`, `bat${b}_current`),
+          temp: getValue(inv.dataList, `B${b}_T`, `bat${b}_temp`),
+          health: 100,
+          cycles: 0,
+          capacity: 5.12,
+        });
+      }
+    }
+  }
+
+  // If no individual battery data, create a single entry from aggregate SOC
+  if (batteries.length === 0 && inverters.length > 0) {
+    const avgSoc = inverters.reduce((s, i) => s + i.batterySOC, 0) / inverters.length;
+    batteries.push({
+      id: 'Battery Pack',
+      soc: Math.round(avgSoc),
+      voltage: 0,
+      current: 0,
+      temp: 0,
+      health: 100,
+      cycles: 0,
+      capacity: 30,
+    });
+  }
+
+  return { inverters, batteries };
 }

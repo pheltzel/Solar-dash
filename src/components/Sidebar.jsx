@@ -1,4 +1,5 @@
-import { Sun, Zap, Thermometer, DollarSign, Lightbulb, LayoutDashboard, Settings } from 'lucide-react';
+import { Sun, Zap, Thermometer, DollarSign, Lightbulb, LayoutDashboard, Settings, Wifi, WifiOff } from 'lucide-react';
+import { useApiHealth } from '../hooks/useApi';
 
 const navItems = [
   { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
@@ -11,6 +12,7 @@ const navItems = [
 ];
 
 export default function Sidebar({ activeTab, onTabChange }) {
+  const { data: health } = useApiHealth();
   return (
     <aside className="w-64 bg-slate-900 border-r border-slate-700/50 flex flex-col min-h-screen">
       <div className="p-5 border-b border-slate-700/50">
@@ -55,6 +57,25 @@ export default function Sidebar({ activeTab, onTabChange }) {
           <p className="text-xs text-slate-500">2x EG4 12000XP</p>
           <p className="text-xs text-slate-500">6 batteries &bull; 30 kWh</p>
         </div>
+        {health && (
+          <div className="mt-2 bg-slate-800 rounded-lg p-3">
+            <p className="text-xs text-slate-400 font-medium mb-1.5">API Connections</p>
+            {[
+              { key: 'eg4', label: 'EG4 Portal' },
+              { key: 'emporia', label: 'Emporia Vue' },
+              { key: 'ecobee', label: 'Ecobee' },
+            ].map(svc => (
+              <div key={svc.key} className="flex items-center gap-2 py-0.5">
+                {health.services?.[svc.key]
+                  ? <Wifi className="w-3 h-3 text-battery-green" />
+                  : <WifiOff className="w-3 h-3 text-slate-600" />}
+                <span className={`text-xs ${health.services?.[svc.key] ? 'text-slate-300' : 'text-slate-600'}`}>
+                  {svc.label}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </aside>
   );

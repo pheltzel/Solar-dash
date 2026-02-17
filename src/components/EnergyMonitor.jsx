@@ -1,13 +1,36 @@
 import { Zap, TrendingUp } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area, Legend } from 'recharts';
-import { vueData } from '../data/mockData';
+import { vueData as mockVue } from '../data/mockData';
+import { useEmporiaData } from '../hooks/useApi';
+
+// Default circuit colors when live data doesn't include them
+const CIRCUIT_COLORS = [
+  '#3b82f6', '#ef4444', '#8b5cf6', '#22c55e', '#f59e0b',
+  '#06b6d4', '#ec4899', '#f97316', '#14b8a6', '#6366f1', '#64748b',
+];
 
 export default function EnergyMonitor() {
+  const { data: liveData } = useEmporiaData();
+
+  // Merge live circuits with mock fallback
+  const circuits = liveData?.circuits
+    ? liveData.circuits.map((c, i) => ({
+        ...c,
+        color: c.color || CIRCUIT_COLORS[i % CIRCUIT_COLORS.length],
+        daily: c.daily || 0,
+      }))
+    : mockVue.circuits;
+
+  const totalUsage = liveData?.totalPower ?? mockVue.totalUsage;
+  const hourlyBreakdown = mockVue.hourlyBreakdown; // Live hourly needs separate call
+
+  const vueData = { circuits, totalUsage, hourlyBreakdown };
+
   const pieData = vueData.circuits
     .filter(c => c.power > 0)
     .sort((a, b) => b.power - a.power);
 
-  const dailyData = vueData.circuits
+  const dailyData = [...vueData.circuits]
     .sort((a, b) => b.daily - a.daily)
     .map(c => ({ name: c.name, daily: c.daily, color: c.color }));
 

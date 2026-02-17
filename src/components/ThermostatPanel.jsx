@@ -1,7 +1,18 @@
 import { Thermometer, Droplets, Wind, MapPin, Eye, Clock } from 'lucide-react';
-import { ecobeeData } from '../data/mockData';
+import { ecobeeData as mockEcobee } from '../data/mockData';
+import { useEcobeeData } from '../hooks/useApi';
 
 export default function ThermostatPanel() {
+  const { data: liveData, error } = useEcobeeData();
+
+  // Merge live API data with mock fallback
+  const ecobeeData = {
+    thermostats: liveData?.thermostats || mockEcobee.thermostats,
+    outdoorTemp: liveData?.outdoor?.temp ?? mockEcobee.outdoorTemp,
+    outdoorHumidity: liveData?.outdoor?.humidity ?? mockEcobee.outdoorHumidity,
+    runtimeHours: mockEcobee.runtimeHours, // Runtime needs separate API call
+  };
+
   return (
     <div className="space-y-6">
       <div>
