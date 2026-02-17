@@ -28,9 +28,22 @@ app.use('/api/emporia', emporiaRouter);
 app.use('/api/eg4', eg4Router);
 
 app.listen(PORT, () => {
-  console.log(`Solar-dash API server running on http://localhost:${PORT}`);
+  console.log(`\nSolar-dash API server running on http://localhost:${PORT}`);
+  console.log('─────────────────────────────────────────');
   console.log('Configured services:');
-  console.log(`  Ecobee:  ${process.env.ECOBEE_API_KEY ? 'API key set' : 'NOT CONFIGURED'}`);
-  console.log(`  Emporia: ${process.env.EMPORIA_EMAIL ? 'Credentials set' : 'NOT CONFIGURED'}`);
-  console.log(`  EG4:     ${process.env.EG4_EMAIL ? 'Credentials set' : 'NOT CONFIGURED'}`);
+
+  const ecobeeKey = process.env.ECOBEE_API_KEY;
+  if (ecobeeKey) {
+    // Warn if it looks like they put an email instead of an API key
+    if (ecobeeKey.includes('@')) {
+      console.log('  Ecobee:  ⚠️  ECOBEE_API_KEY looks like an email — it should be the API key from ecobee.com/developers/');
+    } else {
+      console.log(`  Ecobee:  ✓ API key set (${ecobeeKey.slice(0, 6)}...)`);
+    }
+  } else {
+    console.log('  Ecobee:  ✗ NOT CONFIGURED');
+  }
+  console.log(`  Emporia: ${process.env.EMPORIA_EMAIL ? '✓ ' + process.env.EMPORIA_EMAIL : '✗ NOT CONFIGURED'}`);
+  console.log(`  EG4:     ${process.env.EG4_EMAIL ? '✓ ' + process.env.EG4_EMAIL : '✗ NOT CONFIGURED'}`);
+  console.log('─────────────────────────────────────────\n');
 });

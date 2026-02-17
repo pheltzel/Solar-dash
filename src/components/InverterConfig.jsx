@@ -9,7 +9,7 @@ export default function InverterConfig() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-white">EG4 12000XP Configuration</h2>
+        <h2 className="text-2xl font-bold text-white">{inv.name} Configuration</h2>
         <p className="text-slate-400 text-sm mt-1">Working modes, battery settings, and time programs</p>
       </div>
 
@@ -37,26 +37,26 @@ export default function InverterConfig() {
             <Shield className="w-5 h-5 text-solar-yellow" />
           </div>
           <div>
-            <h3 className="text-base font-semibold text-white">{eg4Data.model}</h3>
+            <h3 className="text-base font-semibold text-white">{inv.name}</h3>
             <p className="text-xs text-slate-400">{inv.id} • Firmware {inv.firmware}</p>
           </div>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="bg-slate-900/50 rounded-lg p-3">
             <p className="text-xs text-slate-500">Max AC Output</p>
-            <p className="text-sm font-semibold text-white">{eg4Data.specs.maxAcOutput} kW</p>
+            <p className="text-sm font-semibold text-white">{inv.model === '6000XP' ? 6 : 12} kW</p>
           </div>
           <div className="bg-slate-900/50 rounded-lg p-3">
             <p className="text-xs text-slate-500">Max PV Input</p>
-            <p className="text-sm font-semibold text-white">{eg4Data.specs.maxPvInput} kW</p>
+            <p className="text-sm font-semibold text-white">{inv.model === '6000XP' ? 13 : 24} kW</p>
           </div>
           <div className="bg-slate-900/50 rounded-lg p-3">
             <p className="text-xs text-slate-500">MPPTs</p>
-            <p className="text-sm font-semibold text-white">{eg4Data.specs.mpptCount}x {eg4Data.specs.mpptMaxCurrent}A</p>
+            <p className="text-sm font-semibold text-white">2x {inv.model === '6000XP' ? 18 : 35}A</p>
           </div>
           <div className="bg-slate-900/50 rounded-lg p-3">
-            <p className="text-xs text-slate-500">AC Passthrough</p>
-            <p className="text-sm font-semibold text-white">{eg4Data.specs.acPassthrough} kW</p>
+            <p className="text-xs text-slate-500">Max Charge Current</p>
+            <p className="text-sm font-semibold text-white">{inv.settings.batteryChargeCurrentLimit} Adc</p>
           </div>
         </div>
       </div>
@@ -187,7 +187,7 @@ export default function InverterConfig() {
             <h3 className="text-lg font-semibold text-white">Battery Bank</h3>
           </div>
           <span className="text-sm text-slate-400">
-            {eg4Data.batteries.length} banks &bull; {eg4Data.totalCapacityKwh} kWh total
+            {eg4Data.batteries.length} banks &bull; {eg4Data.totalCapacityKwh || 30} kWh total
           </span>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -208,8 +208,8 @@ export default function InverterConfig() {
         <div className="mt-4 pt-3 border-t border-slate-700/30 flex items-center justify-between">
           <span className="text-sm text-slate-400">
             Available energy: <span className="text-white font-semibold">
-              {(eg4Data.batteries.reduce((s, b) => s + (b.soc / 100) * b.capacityKwh, 0)).toFixed(1)} kWh
-            </span> of {eg4Data.totalCapacityKwh} kWh
+              {(eg4Data.batteries.reduce((s, b) => s + (b.soc / 100) * (b.capacityKwh || 5.0), 0)).toFixed(1)} kWh
+            </span> of {eg4Data.totalCapacityKwh || 30} kWh
           </span>
           <span className="text-sm text-slate-400">
             Avg SOC: <span className="text-battery-green font-semibold">

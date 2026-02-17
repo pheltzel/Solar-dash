@@ -12,42 +12,22 @@ export default function Dashboard() {
 
   const timeSeriesData = useMemo(() => generateTimeSeriesData(24), []);
 
-  // Use live data if available, otherwise mock
-  const eg4 = eg4Live ? eg4Live : null;
+  // Use live data from the server — server now pre-parses SolarMan values
+  const eg4Inverters = eg4Live?.inverters || mockEg4.inverters;
   const ecobee = ecobeeLive?.thermostats || mockEcobee.thermostats;
   const vueTotal = emporiaLive?.totalPower ?? mockVue.totalUsage;
   const hvacPower = emporiaLive?.circuits?.find(c => c.name.toLowerCase().includes('hvac'))?.power ?? mockVue.circuits[0].power;
 
-  const totalSolar = eg4
-    ? (eg4.inverters || []).reduce((s, i) => {
-        const pv = i.dataList?.find(d => d.key?.includes('Ppv') || d.key?.includes('DPi'));
-        return s + (pv ? Number(pv.value) : 0);
-      }, 0)
-    : mockEg4.inverters.reduce((s, i) => s + i.solarPower, 0);
-
-  const totalLoad = eg4
-    ? (eg4.inverters || []).reduce((s, i) => {
-        const pl = i.dataList?.find(d => d.key?.includes('Pload') || d.key?.includes('Pl'));
-        return s + (pl ? Number(pl.value) : 0);
-      }, 0)
-    : mockEg4.inverters.reduce((s, i) => s + i.loadPower, 0);
-
-  const avgBattery = eg4
-    ? Math.round((eg4.inverters || []).reduce((s, i) => {
-        const soc = i.dataList?.find(d => d.key?.includes('SOC'));
-        return s + (soc ? Number(soc.value) : 0);
-      }, 0) / Math.max((eg4.inverters || []).length, 1))
-    : Math.round(mockEg4.batteries.reduce((s, b) => s + b.soc, 0) / mockEg4.batteries.length);
-
-  const gridNet = eg4
-    ? (eg4.inverters || []).reduce((s, i) => {
-        const pg = i.dataList?.find(d => d.key?.includes('Pgrid') || d.key?.includes('Pg'));
-        return s + (pg ? Number(pg.value) : 0);
-      }, 0)
-    : mockEg4.inverters.reduce((s, i) => s + i.gridPower, 0);
+  // Server pre-parses solarPower, loadPower, batterySOC, gridPower on each inverter
+  const totalSolar = eg4Inverters.reduce((s, i) => s + (i.solarPower || 0), 0);
+  const totalLoad = eg4Inverters.reduce((s, i) => s + (i.loadPower || 0), 0);
+  const avgBattery = Math.round(
+    eg4Inverters.reduce((s, i) => s + (i.batterySOC || 0), 0) / Math.max(eg4Inverters.length, 1)
+  );
+  const gridNet = eg4Inverters.reduce((s, i) => s + (i.gridPower || 0), 0);
 
   const indoorTemp = ecobee[0]?.currentTemp ?? mockEcobee.thermostats[0].currentTemp;
-  const setTemp = ecobee[0]?.setTemp ?? mockEcobee.thermostats[0].setTemp;
+  const setTemp = ecobee[0]?.setTemp ?? ecobee[0]?.coolSetTemp ?? mockEcobee.thermostats[0].setTemp;
   const hvacStatus = ecobee[0]?.hvacStatus ?? mockEcobee.thermostats[0].hvacStatus;
 
   const highAlerts = optimizationAlerts.filter(a => a.severity === 'high');
@@ -71,7 +51,7 @@ export default function Dashboard() {
           title="Solar Production"
           value={totalSolar.toFixed(1)}
           unit="kW"
-          subtitle="Peak today: 8.2 kW"
+          subtitle={`Today: ${eg4Inverters.reduce((s, i) => s + (i.dailyProduction || 0), 0).toFixed(1)} kWh`}
           icon={Sun}
           color="text-solar-yellow"
         />

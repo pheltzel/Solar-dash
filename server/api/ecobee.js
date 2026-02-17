@@ -133,24 +133,45 @@ router.get('/thermostats', async (_req, res) => {
     });
 
     // Transform to match our dashboard format
-    const thermostats = data.thermostatList.map(t => ({
-      id: t.identifier,
-      name: t.name,
-      currentTemp: t.runtime.actualTemperature / 10,
-      setTemp: t.runtime.desiredHeat / 10,
-      coolSetTemp: t.runtime.desiredCool / 10,
-      humidity: t.runtime.actualHumidity,
-      mode: t.settings.hvacMode,
-      hvacStatus: t.equipmentStatus || 'idle',
-      schedule: t.program?.currentClimateRef || 'unknown',
-      sensors: (t.remoteSensors || []).map(s => ({
-        name: s.name,
-        temp: s.capability.find(c => c.type === 'temperature')
-          ? Number(s.capability.find(c => c.type === 'temperature').value) / 10
-          : null,
-        occupancy: s.capability.find(c => c.type === 'occupancy')?.value === 'true',
-      })),
-    }));
+    const thermostats = data.thermostatList.map(t => {
+      const mode = t.settings.hvacMode;
+      // Pick the appropriate setpoint based on mode
+      const setTemp = mode === 'cool'
+        ? t.runtime.desiredCool / 10
+        : mode === 'heat'
+          ? t.runtime.desiredHeat / 10
+          : t.runtime.desiredHeat / 10; // auto/off — show heat setpoint
+
+      // Ecobee equipmentStatus is like "compCool1,fan" or "" — make it user-friendly
+      const rawStatus = t.equipmentStatus || '';
+      let hvacStatus = 'idle';
+      if (rawStatus.includes('Cool') || rawStatus.includes('cool')) hvacStatus = 'cooling';
+      else if (rawStatus.includes('Heat') || rawStatus.includes('heat') || rawStatus.includes('auxHeat')) hvacStatus = 'heating';
+      else if (rawStatus.includes('fan')) hvacStatus = 'fan';
+      else if (rawStatus.length > 0) hvacStatus = 'running';
+
+      console.log(`[Ecobee] ${t.name}: ${t.runtime.actualTemperature / 10}°F (set ${setTemp}°F), mode=${mode}, status=${rawStatus} → ${hvacStatus}`);
+
+      return {
+        id: t.identifier,
+        name: t.name,
+        currentTemp: t.runtime.actualTemperature / 10,
+        setTemp,
+        coolSetTemp: t.runtime.desiredCool / 10,
+        heatSetTemp: t.runtime.desiredHeat / 10,
+        humidity: t.runtime.actualHumidity,
+        mode,
+        hvacStatus,
+        schedule: t.program?.currentClimateRef || 'unknown',
+        sensors: (t.remoteSensors || []).map(s => ({
+          name: s.name,
+          temp: s.capability.find(c => c.type === 'temperature')
+            ? Number(s.capability.find(c => c.type === 'temperature').value) / 10
+            : null,
+          occupancy: s.capability.find(c => c.type === 'occupancy')?.value === 'true',
+        })),
+      };
+    });
 
     // Weather from first thermostat
     const weather = data.thermostatList[0]?.weather?.forecasts?.[0];

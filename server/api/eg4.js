@@ -265,6 +265,43 @@ router.get('/batteries/:deviceSn', async (req, res) => {
   }
 });
 
+// Helper: extract a numeric value from a SolarMan dataList by trying multiple key names
+function extractValue(dataList, ...keys) {
+  if (!dataList) return 0;
+  for (const key of keys) {
+    const exact = dataList.find(d => d.key === key);
+    if (exact) return Number(exact.value) || 0;
+  }
+  for (const key of keys) {
+    const partial = dataList.find(d => d.key?.includes(key));
+    if (partial) return Number(partial.value) || 0;
+  }
+  return 0;
+}
+
+// Pre-parse a dataList into a dashboard-friendly inverter object
+function parseInverterData(deviceSn, deviceName, connectStatus, dataList) {
+  return {
+    deviceSn,
+    deviceName,
+    connectStatus,
+    solarPower: extractValue(dataList, 'DPi_t1', 'Ppv_t1', 'APo_t1'),
+    batteryPower: extractValue(dataList, 'Pb_t1', 'Pbat'),
+    gridPower: extractValue(dataList, 'Pg_t1', 'Pgrid', 'PG_Pt1'),
+    loadPower: extractValue(dataList, 'Pl_t1', 'Pload', 'CT_Pt1'),
+    batterySOC: extractValue(dataList, 'SOC_t1', 'SOC', 'B_SOC1'),
+    batteryVoltage: extractValue(dataList, 'Vb_t1', 'Vbat', 'B_V1'),
+    pvVoltage: extractValue(dataList, 'Vpv1', 'PV1_V1', 'Upv1'),
+    pvCurrent: extractValue(dataList, 'Ipv1', 'PV1_I1'),
+    mppt1Power: extractValue(dataList, 'Ppv1', 'PV1_P1'),
+    mppt2Power: extractValue(dataList, 'Ppv2', 'PV2_P1'),
+    dailyProduction: extractValue(dataList, 'Etdy_ge1', 'Eday_ge1', 'E_today'),
+    totalProduction: extractValue(dataList, 'Et_ge0', 'Et_ge1', 'E_total'),
+    batteryTemp: extractValue(dataList, 'Tb_t1', 'T_BMS1', 'bat_temp'),
+    dataList,
+  };
+}
+
 // Full system overview — combines plants + devices + real-time data
 router.get('/system', async (_req, res) => {
   try {
@@ -284,25 +321,40 @@ router.get('/system', async (_req, res) => {
     });
     const devices = deviceData?.deviceListItems || [];
 
-    // Get real-time data for each inverter
+    // Accept any device with a serial number that isn't purely a data logger
+    const inverterDevices = devices.filter(d =>
+      d.deviceSn && d.deviceType !== 'COLLECTOR' && d.deviceType !== 2
+    );
+
+    console.log(`[EG4] Found ${inverterDevices.length} inverter device(s):`,
+      inverterDevices.map(d => `${d.deviceSn} (type=${d.deviceType})`).join(', '));
+
     const inverters = await Promise.all(
-      devices
-        .filter(d => d.deviceType === 'INVERTER' || d.deviceType === 1 || d.collectorSn)
-        .map(async (device) => {
-          try {
-            const rtData = await solarmanPost('/device/v1.0/currentData', {
-              deviceSn: device.deviceSn,
-            });
-            return {
-              deviceSn: device.deviceSn,
-              deviceName: device.deviceId,
-              connectStatus: device.connectStatus,
-              dataList: rtData?.dataList || [],
-            };
-          } catch {
-            return { deviceSn: device.deviceSn, error: 'Failed to fetch real-time data' };
-          }
-        })
+      inverterDevices.map(async (device) => {
+        try {
+          const rtData = await solarmanPost('/device/v1.0/currentData', {
+            deviceSn: device.deviceSn,
+          });
+
+          const name = device.customName || device.deviceName || device.deviceSn;
+          console.log(`[EG4] ${device.deviceSn} (${name}): ${(rtData?.dataList || []).length} data points`);
+
+          return parseInverterData(
+            device.deviceSn,
+            name,
+            device.connectStatus,
+            rtData?.dataList || [],
+          );
+        } catch (err) {
+          console.error(`[EG4] Failed to get data for ${device.deviceSn}:`, err.message);
+          return {
+            deviceSn: device.deviceSn,
+            deviceName: device.customName || device.deviceName || device.deviceSn,
+            connectStatus: device.connectStatus,
+            error: err.message,
+          };
+        }
+      })
     );
 
     res.json({

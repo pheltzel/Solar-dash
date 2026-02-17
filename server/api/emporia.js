@@ -152,38 +152,66 @@ router.get('/circuits', async (_req, res) => {
       { headers: apiHeaders(token) }
     );
 
+    // Also get daily usage for each device
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    let dailyUsageData = null;
+    try {
+      const { data } = await axios.get(
+        `${API_BASE}/AppAPI?apiMethod=getDeviceListUsages&deviceGids=${deviceGids}&instant=false&scale=1D&energyUnit=KilowattHours`,
+        { headers: apiHeaders(token) }
+      );
+      dailyUsageData = data;
+    } catch (err) {
+      console.warn('[Emporia] daily usage fetch failed, skipping:', err.message);
+    }
+
     // Build circuit list from device channels
     const circuits = [];
     let totalPower = 0;
 
     for (const device of devices) {
       const channels = device.channels || [];
-      for (const ch of channels) {
-        // Find matching usage data
-        const deviceUsages = usageData?.deviceListUsages?.devices || [];
-        const devUsage = deviceUsages.find(u => u.deviceGid === device.deviceGid);
-        const chUsage = devUsage?.channelUsages?.find(cu => cu.channel === ch.channelNum);
+      const deviceUsages = usageData?.deviceListUsages?.devices || [];
+      const devUsage = deviceUsages.find(u => u.deviceGid === device.deviceGid);
+      const dailyDevUsage = dailyUsageData?.deviceListUsages?.devices?.find(u => u.deviceGid === device.deviceGid);
 
-        const powerKw = chUsage ? Math.abs(chUsage.usage) * 60 : 0; // Convert kWh/min to kW
+      for (const ch of channels) {
+        // channelNum can be a string like "1,2,3" (mains) or a number like 4
+        const chNum = String(ch.channelNum);
+        const isMains = chNum === '1,2,3' || chNum === '1' || chNum === '2' || chNum === '3';
+
+        // Find matching usage data — compare as strings to handle type mismatches
+        const chUsage = devUsage?.channelUsages?.find(cu => String(cu.channel) === chNum);
+        const chDaily = dailyDevUsage?.channelUsages?.find(cu => String(cu.channel) === chNum);
+
+        const powerKw = chUsage?.usage != null ? Math.abs(chUsage.usage) * 60 : 0;
+        const dailyKwh = chDaily?.usage != null ? Math.abs(chDaily.usage) : 0;
+
+        const name = ch.name || `Channel ${ch.channelNum}`;
+
+        // Skip unnamed mains channels, but keep named ones (user might have named them)
+        if (isMains && !ch.name) continue;
 
         circuits.push({
-          name: ch.name || `Channel ${ch.channelNum}`,
+          name,
           channelNum: ch.channelNum,
           deviceGid: device.deviceGid,
-          power: Math.round(powerKw * 1000) / 1000, // kW with 3 decimal places
-          daily: 0, // Would need separate call for daily totals
+          power: Math.round(powerKw * 1000) / 1000,
+          daily: Math.round(dailyKwh * 10) / 10,
         });
 
-        if (ch.channelNum !== '1,2,3') { // Skip mains total
+        if (!isMains) {
           totalPower += powerKw;
         }
       }
     }
 
+    console.log(`[Emporia] ${circuits.length} circuits, total power: ${totalPower.toFixed(3)} kW`);
+
     res.json({
       totalPower: Math.round(totalPower * 1000) / 1000,
       circuits: circuits.filter(c => c.name && c.name !== 'Main'),
-      _raw: { devices: custData, usage: usageData },
     });
   } catch (err) {
     console.error('[Emporia] circuits error:', err.response?.data || err.message);

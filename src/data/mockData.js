@@ -37,21 +37,13 @@ export function generateTimeSeriesData(hours = 24) {
   return data;
 }
 
-// EG4 12000XP specific data — 2 inverters, 6 battery banks, 30 kWh total
+// EG4 system — 1x 12000XP + 1x 6000XP, battery banks, 30 kWh total
 export const eg4Data = {
-  model: 'EG4 12000XP',
-  specs: {
-    maxAcOutput: 12, // kW per inverter
-    maxPvInput: 24, // kW utilized per inverter (28 kW STC)
-    mpptCount: 2,
-    mpptMaxCurrent: 35, // A per MPPT
-    acPassthrough: 24, // kW (100A @ 240V)
-    generatorInput: 15, // kW (62.5A @ 240V)
-  },
   inverters: [
     {
       id: 'EG4-01',
-      name: 'Inverter 1 (Garage)',
+      name: 'EG4 12000XP',
+      model: '12000XP',
       status: 'online',
       firmware: 'v3.2.1',
       solarPower: 4.12,
@@ -67,51 +59,6 @@ export const eg4Data = {
       mppt2Power: 1.94,
       dailyProduction: 28.4,
       totalProduction: 12480,
-      workingMode: 'Self-Consumption',
-      // 12000XP specific settings
-      settings: {
-        workingMode: 'Self-Consumption',
-        acChargeEnabled: false,
-        acChargePowerLimit: 6.0, // kW
-        acChargeStopSOC: 95,
-        pvChargePriorityEnabled: false,
-        pvChargePriorityStopSOC: 100,
-        pvChargeMaxPower: 12, // kW
-        forceDischargeEnabled: false,
-        forceDischargePower: 6.0, // kW
-        forceDischargeStopSOC: 20,
-        dischargeControl: 'SOC', // 'SOC' or 'Voltage'
-        onGridCutoffSOC: 15,
-        offGridCutoffSOC: 15,
-        batteryChargeCurrentLimit: 250, // Adc
-        smartLoadEnabled: true,
-        smartLoadMinSOC: 60,
-        smartLoadMinPV: 2.0, // kW
-        timePrograms: [
-          { id: 1, mode: 'PV Charge Priority', start: '09:00', stop: '15:00', enabled: false },
-          { id: 2, mode: 'Force Discharge', start: '17:00', stop: '21:00', enabled: false },
-          { id: 3, mode: 'AC Charge', start: '02:00', stop: '06:00', enabled: false },
-        ],
-      },
-    },
-    {
-      id: 'EG4-02',
-      name: 'Inverter 2 (Shed)',
-      status: 'online',
-      firmware: 'v3.2.1',
-      solarPower: 3.95,
-      batteryPower: 1.20,
-      gridPower: 0.00,
-      loadPower: 2.75,
-      batterySOC: 82,
-      batteryVoltage: 53.1,
-      batteryTemp: 26,
-      pvVoltage: 378.8,
-      pvCurrent: 10.4,
-      mppt1Power: 2.05,
-      mppt2Power: 1.90,
-      dailyProduction: 26.8,
-      totalProduction: 11920,
       workingMode: 'Self-Consumption',
       settings: {
         workingMode: 'Self-Consumption',
@@ -131,6 +78,51 @@ export const eg4Data = {
         smartLoadEnabled: true,
         smartLoadMinSOC: 60,
         smartLoadMinPV: 2.0,
+        timePrograms: [
+          { id: 1, mode: 'PV Charge Priority', start: '09:00', stop: '15:00', enabled: false },
+          { id: 2, mode: 'Force Discharge', start: '17:00', stop: '21:00', enabled: false },
+          { id: 3, mode: 'AC Charge', start: '02:00', stop: '06:00', enabled: false },
+        ],
+      },
+    },
+    {
+      id: 'EG4-02',
+      name: 'EG4 6000XP',
+      model: '6000XP',
+      status: 'online',
+      firmware: 'v3.2.1',
+      solarPower: 3.95,
+      batteryPower: 1.20,
+      gridPower: 0.00,
+      loadPower: 2.75,
+      batterySOC: 82,
+      batteryVoltage: 53.1,
+      batteryTemp: 26,
+      pvVoltage: 378.8,
+      pvCurrent: 10.4,
+      mppt1Power: 2.05,
+      mppt2Power: 1.90,
+      dailyProduction: 26.8,
+      totalProduction: 11920,
+      workingMode: 'Self-Consumption',
+      settings: {
+        workingMode: 'Self-Consumption',
+        acChargeEnabled: false,
+        acChargePowerLimit: 3.0,
+        acChargeStopSOC: 95,
+        pvChargePriorityEnabled: false,
+        pvChargePriorityStopSOC: 100,
+        pvChargeMaxPower: 6.5,
+        forceDischargeEnabled: false,
+        forceDischargePower: 3.0,
+        forceDischargeStopSOC: 20,
+        dischargeControl: 'SOC',
+        onGridCutoffSOC: 15,
+        offGridCutoffSOC: 15,
+        batteryChargeCurrentLimit: 120,
+        smartLoadEnabled: true,
+        smartLoadMinSOC: 60,
+        smartLoadMinPV: 1.0,
         timePrograms: [
           { id: 1, mode: 'PV Charge Priority', start: '09:00', stop: '15:00', enabled: false },
           { id: 2, mode: 'Force Discharge', start: '17:00', stop: '21:00', enabled: false },

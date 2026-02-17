@@ -8,8 +8,8 @@ export default function SolarPanel() {
   const { data: eg4Live } = useEg4System();
   const timeSeriesData = useMemo(() => generateTimeSeriesData(24), []);
 
-  // Use live data when available, mock otherwise
-  const eg4Data = eg4Live ? transformEg4Live(eg4Live) : mockEg4;
+  // Server now pre-parses SolarMan values — transformEg4Live just reshapes for components
+  const eg4Data = eg4Live?.inverters?.length ? transformEg4Live(eg4Live) : mockEg4;
 
   const batteryData = eg4Data.batteries.map(b => ({
     name: b.id,
@@ -28,7 +28,9 @@ export default function SolarPanel() {
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-white">Solar & Battery</h2>
-        <p className="text-slate-400 text-sm mt-1">EG4 12000XP inverters &bull; 6 batteries &bull; 30 kWh</p>
+        <p className="text-slate-400 text-sm mt-1">
+          {eg4Data.inverters.map(i => i.name).join(' + ')}
+        </p>
       </div>
 
       {/* Inverter Cards */}
@@ -161,37 +163,42 @@ function Stat({ label, value, color }) {
   );
 }
 
-// Transform live EG4/SolarMan API data into the shape our components expect
+// Transform live EG4/SolarMan API data into the shape our components expect.
+// The server now pre-parses SolarMan values, so we just reshape into component format.
 function transformEg4Live(live) {
-  const getValue = (dataList, ...keys) => {
-    for (const key of keys) {
-      const item = (dataList || []).find(d => d.key?.includes(key));
-      if (item) return Number(item.value);
-    }
-    return 0;
-  };
-
   const inverters = (live.inverters || []).map((inv, i) => ({
     id: inv.deviceSn || `EG4-${String(i + 1).padStart(2, '0')}`,
     name: inv.deviceName || `Inverter ${i + 1}`,
     status: inv.connectStatus === 1 ? 'Online' : 'Offline',
     firmware: '',
-    solarPower: getValue(inv.dataList, 'Ppv', 'DPi_t1'),
-    batteryPower: getValue(inv.dataList, 'Pbat', 'Pb_t1'),
-    gridPower: getValue(inv.dataList, 'Pgrid', 'Pg_t1'),
-    loadPower: getValue(inv.dataList, 'Pload', 'Pl_t1'),
-    batterySOC: getValue(inv.dataList, 'SOC'),
-    pvVoltage: getValue(inv.dataList, 'Vpv', 'Upv'),
-    pvCurrent: getValue(inv.dataList, 'Ipv'),
-    mppt1Power: getValue(inv.dataList, 'MPPT1', 'Ppv1'),
-    mppt2Power: getValue(inv.dataList, 'MPPT2', 'Ppv2'),
-    dailyProduction: getValue(inv.dataList, 'E_today', 'Etdy'),
-    totalProduction: getValue(inv.dataList, 'E_total', 'Et_ge'),
+    // Use pre-parsed values from server (falls back to 0 if missing)
+    solarPower: inv.solarPower || 0,
+    batteryPower: inv.batteryPower || 0,
+    gridPower: inv.gridPower || 0,
+    loadPower: inv.loadPower || 0,
+    batterySOC: inv.batterySOC || 0,
+    batteryVoltage: inv.batteryVoltage || 0,
+    batteryTemp: inv.batteryTemp || 0,
+    pvVoltage: inv.pvVoltage || 0,
+    pvCurrent: inv.pvCurrent || 0,
+    mppt1Power: inv.mppt1Power || 0,
+    mppt2Power: inv.mppt2Power || 0,
+    dailyProduction: inv.dailyProduction || 0,
+    totalProduction: inv.totalProduction || 0,
     workingMode: 'Self-Consumption',
   }));
 
-  // Battery data — try to extract from inverter data lists
+  // Battery data — try to extract individual banks from raw dataList
   const batteries = [];
+  const getValue = (dataList, ...keys) => {
+    if (!dataList) return 0;
+    for (const key of keys) {
+      const item = dataList.find(d => d.key === key);
+      if (item) return Number(item.value) || 0;
+    }
+    return 0;
+  };
+
   for (const inv of (live.inverters || [])) {
     for (let b = 1; b <= 6; b++) {
       const soc = getValue(inv.dataList, `B${b}_SOC`, `bat${b}_soc`);
@@ -210,19 +217,22 @@ function transformEg4Live(live) {
     }
   }
 
-  // If no individual battery data, create a single entry from aggregate SOC
+  // If no individual battery data, create entries from aggregate SOC per inverter
   if (batteries.length === 0 && inverters.length > 0) {
-    const avgSoc = inverters.reduce((s, i) => s + i.batterySOC, 0) / inverters.length;
-    batteries.push({
-      id: 'Battery Pack',
-      soc: Math.round(avgSoc),
-      voltage: 0,
-      current: 0,
-      temp: 0,
-      health: 100,
-      cycles: 0,
-      capacity: 30,
-    });
+    for (const inv of inverters) {
+      if (inv.batterySOC > 0) {
+        batteries.push({
+          id: inv.name,
+          soc: Math.round(inv.batterySOC),
+          voltage: inv.batteryVoltage,
+          current: 0,
+          temp: inv.batteryTemp,
+          health: 100,
+          cycles: 0,
+          capacity: 0,
+        });
+      }
+    }
   }
 
   return { inverters, batteries };
