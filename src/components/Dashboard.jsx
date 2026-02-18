@@ -1,7 +1,7 @@
 import { Sun, Zap, Battery, ArrowDownToLine, ArrowUpFromLine, Thermometer, AlertTriangle } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import StatusCard from './StatusCard';
-import { eg4Data as mockEg4, ecobeeData as mockEcobee, vueData as mockVue, optimizationAlerts, generateTimeSeriesData } from '../data/mockData';
+import { ecobeeData as mockEcobee, vueData as mockVue, optimizationAlerts, generateTimeSeriesData } from '../data/mockData';
 import { useMemo } from 'react';
 import { useEg4System, useEcobeeData, useEmporiaData } from '../hooks/useApi';
 
@@ -12,19 +12,22 @@ export default function Dashboard() {
 
   const timeSeriesData = useMemo(() => generateTimeSeriesData(24), []);
 
-  // Use live data from the server — server now pre-parses SolarMan values
-  const eg4Inverters = eg4Live?.inverters || mockEg4.inverters;
+  // EG4: live data or null — no mock fallback
+  const hasEg4 = eg4Live?.inverters?.length > 0;
+  const eg4Inverters = hasEg4 ? eg4Live.inverters : [];
+
+  const totalSolar = hasEg4 ? eg4Inverters.reduce((s, i) => s + (i.solarPower || 0), 0) : null;
+  const totalLoad = hasEg4 ? eg4Inverters.reduce((s, i) => s + (i.loadPower || 0), 0) : null;
+  const avgBattery = hasEg4
+    ? Math.round(eg4Inverters.reduce((s, i) => s + (i.batterySOC || 0), 0) / eg4Inverters.length)
+    : null;
+  const gridNet = hasEg4 ? eg4Inverters.reduce((s, i) => s + (i.gridPower || 0), 0) : null;
+  const dailyProd = hasEg4 ? eg4Inverters.reduce((s, i) => s + (i.dailyProduction || 0), 0) : null;
+
+  // Ecobee / Emporia: still fall back to mock for now (we'll fix these next)
   const ecobee = ecobeeLive?.thermostats || mockEcobee.thermostats;
   const vueTotal = emporiaLive?.totalPower ?? mockVue.totalUsage;
   const hvacPower = emporiaLive?.circuits?.find(c => c.name.toLowerCase().includes('hvac'))?.power ?? mockVue.circuits[0].power;
-
-  // Server pre-parses solarPower, loadPower, batterySOC, gridPower on each inverter
-  const totalSolar = eg4Inverters.reduce((s, i) => s + (i.solarPower || 0), 0);
-  const totalLoad = eg4Inverters.reduce((s, i) => s + (i.loadPower || 0), 0);
-  const avgBattery = Math.round(
-    eg4Inverters.reduce((s, i) => s + (i.batterySOC || 0), 0) / Math.max(eg4Inverters.length, 1)
-  );
-  const gridNet = eg4Inverters.reduce((s, i) => s + (i.gridPower || 0), 0);
 
   const indoorTemp = ecobee[0]?.currentTemp ?? mockEcobee.thermostats[0].currentTemp;
   const setTemp = ecobee[0]?.setTemp ?? ecobee[0]?.coolSetTemp ?? mockEcobee.thermostats[0].setTemp;
@@ -49,15 +52,15 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <StatusCard
           title="Solar Production"
-          value={totalSolar.toFixed(1)}
+          value={totalSolar != null ? totalSolar.toFixed(1) : '--'}
           unit="kW"
-          subtitle={`Today: ${eg4Inverters.reduce((s, i) => s + (i.dailyProduction || 0), 0).toFixed(1)} kWh`}
+          subtitle={dailyProd != null ? `Today: ${dailyProd.toFixed(1)} kWh` : 'Connecting to EG4...'}
           icon={Sun}
           color="text-solar-yellow"
         />
         <StatusCard
           title="Home Consumption"
-          value={totalLoad.toFixed(1)}
+          value={totalLoad != null ? totalLoad.toFixed(1) : '--'}
           unit="kW"
           subtitle={`HVAC: ${hvacPower} kW`}
           icon={Zap}
@@ -65,19 +68,19 @@ export default function Dashboard() {
         />
         <StatusCard
           title="Battery"
-          value={avgBattery}
+          value={avgBattery != null ? avgBattery : '--'}
           unit="%"
-          subtitle="6 banks &bull; 30 kWh total"
+          subtitle={hasEg4 ? `${eg4Inverters.length} inverter(s)` : 'Connecting to EG4...'}
           icon={Battery}
           color="text-battery-green"
         />
         <StatusCard
-          title={gridNet <= 0 ? 'Grid Export' : 'Grid Import'}
-          value={Math.abs(gridNet).toFixed(2)}
+          title={gridNet != null && gridNet <= 0 ? 'Grid Export' : 'Grid Import'}
+          value={gridNet != null ? Math.abs(gridNet).toFixed(2) : '--'}
           unit="kW"
-          subtitle={gridNet <= 0 ? 'Selling to grid' : 'Buying from grid'}
-          icon={gridNet <= 0 ? ArrowUpFromLine : ArrowDownToLine}
-          color={gridNet <= 0 ? 'text-battery-green' : 'text-grid-red'}
+          subtitle={gridNet != null ? (gridNet <= 0 ? 'Selling to grid' : 'Buying from grid') : 'Connecting to EG4...'}
+          icon={gridNet != null && gridNet <= 0 ? ArrowUpFromLine : ArrowDownToLine}
+          color={gridNet != null && gridNet <= 0 ? 'text-battery-green' : 'text-grid-red'}
         />
         <StatusCard
           title="Indoor Temp"

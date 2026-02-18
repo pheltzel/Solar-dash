@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import axios from 'axios';
+import crypto from 'crypto';
 
 const router = Router();
 
@@ -24,15 +25,17 @@ async function authenticate() {
     throw new Error('EG4 credentials not configured. Set EG4_EMAIL and EG4_PASSWORD in .env');
   }
 
-  // Try the SolarMan-style auth endpoint
+  // SolarMan Open API authentication
+  // Requires: SHA256-hashed password, appSecret in body, appId in query params
+  const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
+
   try {
     const { data } = await axios.post(`${SOLARMAN_API}/account/v1.0/token`, {
-      appId: '202009101423',
+      appSecret: 'apitest',
       email,
-      password,
-      orgId: null,
+      password: hashedPassword,
     }, {
-      params: { language: 'en' },
+      params: { appId: '202009101423', language: 'en' },
     });
 
     if (data.success && data.access_token) {
@@ -41,8 +44,9 @@ async function authenticate() {
       console.log('[EG4] Authenticated via SolarMan API');
       return sessionToken;
     }
+    console.error('[EG4] SolarMan auth response (no token):', JSON.stringify(data).slice(0, 300));
   } catch (err) {
-    console.log('[EG4] SolarMan global API failed, trying direct portal...');
+    console.error('[EG4] SolarMan auth failed:', err.response?.status, JSON.stringify(err.response?.data || err.message).slice(0, 300));
   }
 
   // Fallback: Try the direct EG4 portal login
@@ -366,6 +370,95 @@ router.get('/system', async (_req, res) => {
     console.error('[EG4] system error:', err.response?.data || err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// ── Diagnostic test endpoint ─────────────────────────────────────────────────
+// Open http://localhost:3001/api/eg4/test in a browser to see what works/fails
+router.get('/test', async (_req, res) => {
+  const results = {
+    step1_auth: null,
+    step2_stations: null,
+    step3_devices: null,
+    step4_inverterData: null,
+  };
+
+  // Step 1: Auth
+  try {
+    sessionToken = null; // Force re-auth
+    tokenExpiry = 0;
+    const token = await getToken();
+    results.step1_auth = { success: true, tokenPreview: token.slice(0, 20) + '...' };
+  } catch (err) {
+    results.step1_auth = { success: false, error: err.message };
+    return res.json(results);
+  }
+
+  // Step 2: List stations
+  try {
+    const data = await solarmanPost('/station/v1.0/list', { page: 1, size: 20 });
+    const stations = data?.stationList || [];
+    results.step2_stations = {
+      success: true,
+      count: stations.length,
+      stations: stations.map(s => ({ id: s.id, name: s.name })),
+    };
+    if (stations.length === 0) return res.json(results);
+  } catch (err) {
+    results.step2_stations = { success: false, error: err.response?.data || err.message };
+    return res.json(results);
+  }
+
+  // Step 3: List devices for first station
+  try {
+    const stationId = results.step2_stations.stations[0].id;
+    const data = await solarmanPost('/station/v1.0/device', {
+      stationId: Number(stationId),
+      page: 1,
+      size: 20,
+    });
+    const devices = data?.deviceListItems || [];
+    results.step3_devices = {
+      success: true,
+      count: devices.length,
+      devices: devices.map(d => ({
+        sn: d.deviceSn,
+        name: d.customName || d.deviceName || d.deviceSn,
+        type: d.deviceType,
+        status: d.connectStatus,
+      })),
+    };
+    if (devices.length === 0) return res.json(results);
+  } catch (err) {
+    results.step3_devices = { success: false, error: err.response?.data || err.message };
+    return res.json(results);
+  }
+
+  // Step 4: Get currentData for first device
+  try {
+    const firstDevice = results.step3_devices.devices[0];
+    const data = await solarmanPost('/device/v1.0/currentData', {
+      deviceSn: firstDevice.sn,
+    });
+    const dataList = data?.dataList || [];
+    results.step4_inverterData = {
+      success: true,
+      deviceSn: firstDevice.sn,
+      dataPointCount: dataList.length,
+      // Show first 10 data points so we can see actual key names
+      sampleData: dataList.slice(0, 10).map(d => ({
+        key: d.key,
+        value: d.value,
+        unit: d.unit,
+        name: d.name,
+      })),
+      // Show all key names so we can match them
+      allKeys: dataList.map(d => d.key),
+    };
+  } catch (err) {
+    results.step4_inverterData = { success: false, error: err.response?.data || err.message };
+  }
+
+  res.json(results);
 });
 
 export { router as eg4Router };
