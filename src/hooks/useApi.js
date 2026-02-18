@@ -73,6 +73,14 @@ export function useEg4System() {
 }
 
 /**
+ * EG4 combined real-time data + daily max PV — polls every 30 seconds.
+ * Primary data source for the EG4 dashboard.
+ */
+export function useEg4DailyStats() {
+  return useApi('/api/eg4/daily-stats', { interval: 30_000 });
+}
+
+/**
  * EG4 inverter real-time data — polls every 15 seconds.
  */
 export function useEg4Inverter(deviceSn) {

@@ -1,27 +1,17 @@
 import { useState } from 'react';
 import './App.css';
 import Sidebar from './components/Sidebar';
-import Dashboard from './components/Dashboard';
-import SolarPanel from './components/SolarPanel';
-import EnergyMonitor from './components/EnergyMonitor';
-import ThermostatPanel from './components/ThermostatPanel';
-import UtilityPanel from './components/UtilityPanel';
-import OptimizationPanel from './components/OptimizationPanel';
-import InverterConfig from './components/InverterConfig';
+import EG4Dashboard from './components/EG4Dashboard';
 
+// Only EG4 panels are active now.
+// Vue, Ecobee, and NNK Co-op panels will be added here as each integration matures.
 const panels = {
-  dashboard: Dashboard,
-  solar: SolarPanel,
-  config: InverterConfig,
-  energy: EnergyMonitor,
-  hvac: ThermostatPanel,
-  utility: UtilityPanel,
-  optimize: OptimizationPanel,
+  dashboard: EG4Dashboard,
 };
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const ActivePanel = panels[activeTab];
+  const ActivePanel = panels[activeTab] || EG4Dashboard;
 
   return (
     <div className="flex min-h-screen bg-slate-950">

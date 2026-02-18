@@ -1,81 +1,102 @@
-import { Sun, Zap, Thermometer, DollarSign, Lightbulb, LayoutDashboard, Settings, Wifi, WifiOff } from 'lucide-react';
+import { Sun, Wifi, WifiOff } from 'lucide-react';
 import { useApiHealth } from '../hooks/useApi';
 
+// Active navigation items (EG4 only for now)
 const navItems = [
-  { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
-  { id: 'solar', label: 'Solar & Battery', icon: Sun },
-  { id: 'config', label: '12000XP Config', icon: Settings },
-  { id: 'energy', label: 'Energy Monitor', icon: Zap },
-  { id: 'hvac', label: 'HVAC / Ecobee', icon: Thermometer },
-  { id: 'utility', label: 'Utility & Costs', icon: DollarSign },
-  { id: 'optimize', label: 'Optimize', icon: Lightbulb },
+  { id: 'dashboard', label: 'EG4 Overview', icon: Sun },
+];
+
+// Future integrations — displayed as inactive placeholders
+const plannedIntegrations = [
+  { label: 'Emporia Vue',  sub: 'Circuit monitoring' },
+  { label: 'Ecobee',       sub: 'HVAC & thermostat'  },
+  { label: 'NNK Co-op',   sub: 'Utility & rates'    },
 ];
 
 export default function Sidebar({ activeTab, onTabChange }) {
   const { data: health } = useApiHealth();
+  const eg4Ok = !!health?.services?.eg4;
+
   return (
-    <aside className="w-64 bg-slate-900 border-r border-slate-700/50 flex flex-col min-h-screen">
+    <aside className="w-60 bg-slate-900 border-r border-slate-700/50 flex flex-col min-h-screen">
+      {/* Branding */}
       <div className="p-5 border-b border-slate-700/50">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-gradient-to-br from-solar-yellow to-solar-orange rounded-lg flex items-center justify-center">
-            <Sun className="w-6 h-6 text-white" />
+          <div className="w-9 h-9 bg-gradient-to-br from-solar-yellow to-solar-orange rounded-lg flex items-center justify-center flex-shrink-0">
+            <Sun className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-white leading-tight">Solar Dash</h1>
-            <p className="text-xs text-slate-400">Optimization Dashboard</p>
+            <h1 className="text-base font-bold text-white leading-tight">Solar Dash</h1>
+            <p className="text-xs text-slate-500">Energy Optimization</p>
           </div>
         </div>
       </div>
 
-      <nav className="flex-1 p-3 space-y-1">
-        {navItems.map(item => {
-          const Icon = item.icon;
-          const isActive = activeTab === item.id;
-          return (
-            <button
-              key={item.id}
-              onClick={() => onTabChange(item.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all cursor-pointer ${
-                isActive
-                  ? 'bg-solar-yellow/15 text-solar-yellow'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <Icon className="w-5 h-5" />
-              {item.label}
-            </button>
-          );
-        })}
-      </nav>
-
-      <div className="p-4 border-t border-slate-700/50">
-        <div className="bg-slate-800 rounded-lg p-3">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-2 h-2 rounded-full bg-battery-green animate-pulse" />
-            <span className="text-xs text-slate-300 font-medium">System Online</span>
-          </div>
-          <p className="text-xs text-slate-500">2x EG4 12000XP</p>
-          <p className="text-xs text-slate-500">6 batteries &bull; 30 kWh</p>
+      <nav className="flex-1 p-3 space-y-6">
+        {/* EG4 section */}
+        <div>
+          <p className="text-xs text-slate-600 uppercase tracking-wider px-2 pb-1 font-semibold">
+            EG4 Inverters
+          </p>
+          {navItems.map(item => {
+            const Icon = item.icon;
+            const active = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => onTabChange(item.id)}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all cursor-pointer ${
+                  active
+                    ? 'bg-solar-yellow/15 text-solar-yellow'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                }`}
+              >
+                <Icon className="w-4 h-4" />
+                {item.label}
+              </button>
+            );
+          })}
         </div>
-        {health && (
-          <div className="mt-2 bg-slate-800 rounded-lg p-3">
-            <p className="text-xs text-slate-400 font-medium mb-1.5">API Connections</p>
-            {[
-              { key: 'eg4', label: 'EG4 Portal' },
-              { key: 'emporia', label: 'Emporia Vue' },
-              { key: 'ecobee', label: 'Ecobee' },
-            ].map(svc => (
-              <div key={svc.key} className="flex items-center gap-2 py-0.5">
-                {health.services?.[svc.key]
-                  ? <Wifi className="w-3 h-3 text-battery-green" />
-                  : <WifiOff className="w-3 h-3 text-slate-600" />}
-                <span className={`text-xs ${health.services?.[svc.key] ? 'text-slate-300' : 'text-slate-600'}`}>
-                  {svc.label}
-                </span>
+
+        {/* Planned integrations — greyed out, not clickable */}
+        <div>
+          <p className="text-xs text-slate-600 uppercase tracking-wider px-2 pb-1 font-semibold">
+            Coming Soon
+          </p>
+          <div className="space-y-0.5">
+            {plannedIntegrations.map(item => (
+              <div
+                key={item.label}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-lg opacity-35 cursor-default"
+              >
+                <div className="w-4 h-4 rounded border border-slate-600/60 border-dashed flex-shrink-0" />
+                <div>
+                  <p className="text-sm text-slate-500 leading-tight">{item.label}</p>
+                  <p className="text-xs text-slate-600">{item.sub}</p>
+                </div>
               </div>
             ))}
           </div>
-        )}
+        </div>
+      </nav>
+
+      {/* Connection status footer */}
+      <div className="p-4 border-t border-slate-700/50">
+        <div className="bg-slate-800 rounded-lg p-3">
+          <div className="flex items-center gap-2">
+            {eg4Ok
+              ? <Wifi className="w-3.5 h-3.5 text-battery-green flex-shrink-0" />
+              : <WifiOff className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />}
+            <span className={`text-xs font-medium ${eg4Ok ? 'text-slate-300' : 'text-slate-500'}`}>
+              {eg4Ok ? 'EG4 Configured' : 'EG4 Not Configured'}
+            </span>
+          </div>
+          <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+            {eg4Ok
+              ? 'Live data · refreshes every 30 s'
+              : 'Set EG4_EMAIL + EG4_PASSWORD in .env'}
+          </p>
+        </div>
       </div>
     </aside>
   );

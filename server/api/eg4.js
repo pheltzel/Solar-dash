@@ -15,6 +15,25 @@ const SOLARMAN_API = 'https://globalapi.solarmanpv.com';
 let sessionToken = null;
 let tokenExpiry = 0;
 
+// ── Daily max PV tracking ─────────────────────────────────────────────────────
+// Resets automatically each calendar day (server-local time).
+let _dailyMaxPV = 0;
+let _dailyMaxPVTimestamp = null;
+let _dailyMaxDate = null; // 'YYYY-MM-DD'
+
+function updateDailyMax(combinedSolarWatts) {
+  const today = new Date().toISOString().split('T')[0];
+  if (_dailyMaxDate !== today) {
+    _dailyMaxPV = 0;
+    _dailyMaxPVTimestamp = null;
+    _dailyMaxDate = today;
+  }
+  if (combinedSolarWatts > _dailyMaxPV) {
+    _dailyMaxPV = combinedSolarWatts;
+    _dailyMaxPVTimestamp = new Date().toISOString();
+  }
+}
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
 async function authenticate() {
@@ -368,6 +387,70 @@ router.get('/system', async (_req, res) => {
     });
   } catch (err) {
     console.error('[EG4] system error:', err.response?.data || err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Combined real-time stats + daily max PV — the primary endpoint for the dashboard
+router.get('/daily-stats', async (_req, res) => {
+  try {
+    const plantData = await solarmanPost('/station/v1.0/list', { page: 1, size: 20 });
+    const stations = plantData?.stationList || [];
+
+    if (stations.length === 0) {
+      return res.status(503).json({ error: 'No stations found in EG4 account' });
+    }
+
+    const deviceData = await solarmanPost('/station/v1.0/device', {
+      stationId: stations[0].id,
+      page: 1,
+      size: 20,
+    });
+
+    const inverterDevices = (deviceData?.deviceListItems || []).filter(
+      d => d.deviceSn && d.deviceType !== 'COLLECTOR' && d.deviceType !== 2,
+    );
+
+    const inverters = await Promise.all(
+      inverterDevices.map(async (device) => {
+        try {
+          const rtData = await solarmanPost('/device/v1.0/currentData', {
+            deviceSn: device.deviceSn,
+          });
+          const name = device.customName || device.deviceName || device.deviceSn;
+          return parseInverterData(device.deviceSn, name, device.connectStatus, rtData?.dataList || []);
+        } catch (err) {
+          console.error(`[EG4] daily-stats: failed for ${device.deviceSn}:`, err.message);
+          return {
+            deviceSn: device.deviceSn,
+            deviceName: device.customName || device.deviceName || device.deviceSn,
+            connectStatus: device.connectStatus,
+            error: err.message,
+          };
+        }
+      }),
+    );
+
+    const combined = {
+      solarPower:      inverters.reduce((s, i) => s + (i.solarPower      || 0), 0),
+      loadPower:       inverters.reduce((s, i) => s + (i.loadPower       || 0), 0),
+      batteryPower:    inverters.reduce((s, i) => s + (i.batteryPower    || 0), 0),
+      gridPower:       inverters.reduce((s, i) => s + (i.gridPower       || 0), 0),
+      dailyProduction: inverters.reduce((s, i) => s + (i.dailyProduction || 0), 0),
+    };
+
+    updateDailyMax(combined.solarPower);
+
+    res.json({
+      station: stations[0],
+      inverters,
+      combined,
+      dailyMaxPV:          _dailyMaxPV,
+      dailyMaxPVTimestamp: _dailyMaxPVTimestamp,
+      lastUpdated:         new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('[EG4] daily-stats error:', err.response?.data || err.message);
     res.status(500).json({ error: err.message });
   }
 });
