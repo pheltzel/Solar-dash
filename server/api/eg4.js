@@ -1,437 +1,231 @@
 import { Router } from 'express';
 import axios from 'axios';
-import crypto from 'crypto';
 
 const router = Router();
-
-// EG4 uses the SolarMan / SOLARMAN Smart platform behind the scenes
-// monitor.eg4electronics.com is a rebranded SolarMan portal
 const BASE_URL = 'https://monitor.eg4electronics.com';
-const API_BASE = `${BASE_URL}/api`;
 
-// Alternative: SolarMan OpenAPI (if EG4 portal uses it)
-const SOLARMAN_API = 'https://globalapi.solarmanpv.com';
-
-let sessionToken = null;
-let tokenExpiry = 0;
+// ── Session state ─────────────────────────────────────────────────────────────
+let _sessionCookie = null;
+let _cookieExpiry  = 0;
+let _inverters     = []; // [{ serialNum, name }]
 
 // ── Daily max PV tracking ─────────────────────────────────────────────────────
-// Resets automatically each calendar day (server-local time).
-let _dailyMaxPV = 0;
+let _dailyMaxPV          = 0;
 let _dailyMaxPVTimestamp = null;
-let _dailyMaxDate = null; // 'YYYY-MM-DD'
+let _dailyMaxDate        = null;
 
-function updateDailyMax(combinedSolarWatts) {
+function updateDailyMax(watts) {
   const today = new Date().toISOString().split('T')[0];
   if (_dailyMaxDate !== today) {
     _dailyMaxPV = 0;
     _dailyMaxPVTimestamp = null;
     _dailyMaxDate = today;
   }
-  if (combinedSolarWatts > _dailyMaxPV) {
-    _dailyMaxPV = combinedSolarWatts;
+  if (watts > _dailyMaxPV) {
+    _dailyMaxPV = watts;
     _dailyMaxPVTimestamp = new Date().toISOString();
   }
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
+function extractInvertersFromLoginResponse(data) {
+  const inverters = [];
+  const obj = data?.obj;
+  if (!obj) return inverters;
+
+  // The login response may nest inverters inside a plant/station list
+  const items = Array.isArray(obj)
+    ? obj
+    : obj.plantList || obj.stationList || obj.inverterList || [obj];
+
+  for (const item of items) {
+    // Inverter lists nested inside a plant object
+    const nested = item?.inverterList || item?.deviceList || item?.devices || [];
+    for (const inv of nested) {
+      const sn = inv.serialNum || inv.sn || inv.inverterSn || inv.deviceSn;
+      if (sn) {
+        inverters.push({ serialNum: sn, name: inv.name || inv.deviceName || sn });
+      }
+    }
+    // Inverter directly as a top-level item
+    const directSn = item.serialNum || item.sn || item.inverterSn;
+    if (directSn && !nested.length) {
+      inverters.push({ serialNum: directSn, name: item.name || item.deviceName || directSn });
+    }
+  }
+  return inverters;
+}
+
 async function authenticate() {
-  // Accept either EG4_USERNAME (plain username) or EG4_EMAIL (email address)
   const username = process.env.EG4_USERNAME || process.env.EG4_EMAIL;
   const password = process.env.EG4_PASSWORD;
 
   if (!username || !password) {
-    throw new Error('EG4 credentials not configured. Set EG4_USERNAME (or EG4_EMAIL) and EG4_PASSWORD in .env');
+    throw new Error(
+      'EG4 credentials not configured. Set EG4_USERNAME and EG4_PASSWORD in .env',
+    );
   }
 
-  // SolarMan Open API authentication
-  // Requires: SHA256-hashed password, appSecret in body, appId in query params
-  const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
+  console.log(`[EG4] Logging in as "${username}"...`);
 
-  try {
-    const { data } = await axios.post(`${SOLARMAN_API}/account/v1.0/token`, {
-      appSecret: 'apitest',
-      username,   // SolarMan accepts username or email in this field
-      password: hashedPassword,
-    }, {
-      params: { appId: '202009101423', language: 'en' },
-    });
+  const body = new URLSearchParams({ account: username, password }).toString();
+  const res = await axios.post(`${BASE_URL}/WManage/web/login`, body, {
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Accept: 'application/json',
+    },
+    validateStatus: () => true, // handle status codes manually
+  });
 
-    if (data.success && data.access_token) {
-      sessionToken = data.access_token;
-      tokenExpiry = Date.now() + (data.expires_in || 7200) * 1000 - 60_000;
-      console.log('[EG4] Authenticated via SolarMan API');
-      return sessionToken;
-    }
-    console.error('[EG4] SolarMan auth response (no token):', JSON.stringify(data).slice(0, 300));
-  } catch (err) {
-    console.error('[EG4] SolarMan auth failed:', err.response?.status, JSON.stringify(err.response?.data || err.message).slice(0, 300));
+  console.log(`[EG4] Login status: ${res.status}`);
+  console.log(`[EG4] Login response: ${JSON.stringify(res.data).slice(0, 400)}`);
+
+  if (res.status !== 200) {
+    throw new Error(`EG4 login HTTP ${res.status}: ${JSON.stringify(res.data).slice(0, 200)}`);
+  }
+  if (res.data?.success === false) {
+    throw new Error(`EG4 login rejected: ${res.data?.msg || res.data?.message || JSON.stringify(res.data).slice(0, 200)}`);
   }
 
-  // Fallback: Try the direct EG4 portal login
-  try {
-    const { data, headers } = await axios.post(`${BASE_URL}/api/v1/login`, {
-      username,   // try username field
-      email: username,   // some portals expect email field
-      password,
-      isRemember: true,
-    }, {
-      headers: { 'Content-Type': 'application/json' },
-      maxRedirects: 0,
-      validateStatus: s => s < 400,
-    });
-
-    // Token might be in response body or set-cookie
-    const token = data?.data?.token || data?.token || data?.access_token;
-    if (token) {
-      sessionToken = token;
-      tokenExpiry = Date.now() + 7200_000;
-      console.log('[EG4] Authenticated via portal login');
-      return sessionToken;
-    }
-
-    // Check cookies
-    const cookies = headers['set-cookie'];
-    if (cookies) {
-      const sessionCookie = cookies.find(c => c.includes('token=') || c.includes('session'));
-      if (sessionCookie) {
-        sessionToken = sessionCookie;
-        tokenExpiry = Date.now() + 7200_000;
-        console.log('[EG4] Authenticated via portal cookie');
-        return sessionToken;
-      }
-    }
-
-    console.log('[EG4] Login response:', JSON.stringify(data).slice(0, 500));
-    throw new Error('Could not extract token from EG4 login response');
-  } catch (err) {
-    if (err.response) {
-      console.error('[EG4] Login failed:', err.response.status, JSON.stringify(err.response.data).slice(0, 500));
-    }
-    throw new Error(`EG4 authentication failed: ${err.message}`);
+  // Capture session cookie (JSESSIONID or similar)
+  const setCookies = res.headers['set-cookie'] || [];
+  if (setCookies.length > 0) {
+    _sessionCookie = setCookies.map(c => c.split(';')[0]).join('; ');
+    console.log(`[EG4] Session cookie: ${_sessionCookie.slice(0, 50)}...`);
+  } else {
+    console.warn('[EG4] Warning: no Set-Cookie in login response');
+    _sessionCookie = ''; // Proceed anyway — server may use IP-based sessions
   }
+
+  // Parse inverters from the login payload
+  _inverters = extractInvertersFromLoginResponse(res.data);
+
+  // Fallback: explicit serial numbers from .env
+  if (_inverters.length === 0) {
+    const envSerials = process.env.EG4_SERIAL_NUMBERS || '';
+    if (envSerials) {
+      _inverters = envSerials.split(',').map(s => ({ serialNum: s.trim(), name: s.trim() }));
+      console.log(`[EG4] Using EG4_SERIAL_NUMBERS from env: ${_inverters.map(i => i.serialNum).join(', ')}`);
+    } else {
+      console.warn('[EG4] No inverters found in login response. Add EG4_SERIAL_NUMBERS=SN1,SN2 to .env if needed.');
+    }
+  } else {
+    console.log(`[EG4] Inverters found: ${_inverters.map(i => `${i.serialNum}(${i.name})`).join(', ')}`);
+  }
+
+  _cookieExpiry = Date.now() + 2 * 60 * 60 * 1000; // 2-hour session
+  return _sessionCookie;
 }
 
-async function getToken() {
-  if (sessionToken && Date.now() < tokenExpiry) return sessionToken;
+async function getSession() {
+  if (_sessionCookie !== null && Date.now() < _cookieExpiry) return _sessionCookie;
   return authenticate();
 }
 
-// ── SolarMan API helpers ──────────────────────────────────────────────────────
+// ── HTTP helper ───────────────────────────────────────────────────────────────
 
-async function solarmanGet(path, params = {}) {
-  const token = await getToken();
-  const { data } = await axios.get(`${SOLARMAN_API}${path}`, {
-    params: { ...params, language: 'en' },
-    headers: { Authorization: `Bearer ${token}` },
+async function portalPost(path, params = {}) {
+  const cookie = await getSession();
+  const body   = new URLSearchParams(params).toString();
+  const headers = {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    Accept: 'application/json',
+    ...(cookie ? { Cookie: cookie } : {}),
+  };
+
+  let res = await axios.post(`${BASE_URL}${path}`, body, {
+    headers,
+    validateStatus: () => true,
   });
-  return data;
+
+  // Re-authenticate on 401 and retry once
+  if (res.status === 401) {
+    console.log('[EG4] Session expired — re-authenticating');
+    _sessionCookie = null;
+    _cookieExpiry  = 0;
+    const newCookie = await authenticate();
+    res = await axios.post(`${BASE_URL}${path}`, body, {
+      headers: { ...headers, Cookie: newCookie || '' },
+    });
+  }
+
+  return res.data;
 }
 
-async function solarmanPost(path, body = {}) {
-  const token = await getToken();
-  const { data } = await axios.post(`${SOLARMAN_API}${path}`, body, {
-    params: { language: 'en' },
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-  });
-  return data;
-}
+// ── Data parsing ──────────────────────────────────────────────────────────────
 
-// ── Data endpoints ────────────────────────────────────────────────────────────
-
-// Get plant/station list
-router.get('/plants', async (_req, res) => {
-  try {
-    const data = await solarmanPost('/station/v1.0/list', { page: 1, size: 20 });
-    res.json(data);
-  } catch (err) {
-    console.error('[EG4] plants error:', err.response?.data || err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Get device list for a plant
-router.get('/devices', async (req, res) => {
-  try {
-    const { stationId } = req.query;
-    if (!stationId) {
-      // First get the plant list to find stationId
-      const plants = await solarmanPost('/station/v1.0/list', { page: 1, size: 20 });
-      const firstStation = plants?.stationList?.[0];
-      if (!firstStation) {
-        return res.status(404).json({ error: 'No plants/stations found' });
-      }
-      req.query.stationId = firstStation.id;
+// Try multiple field name variants; return the first non-null numeric value found
+function pick(obj, ...keys) {
+  for (const k of keys) {
+    const v = obj?.[k];
+    if (v !== undefined && v !== null && v !== '') {
+      const n = Number(v);
+      if (!isNaN(n)) return n;
     }
-
-    const data = await solarmanPost('/station/v1.0/device', {
-      stationId: Number(req.query.stationId),
-      page: 1,
-      size: 20,
-    });
-    res.json(data);
-  } catch (err) {
-    console.error('[EG4] devices error:', err.response?.data || err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Get real-time data for a specific inverter
-router.get('/inverter/:deviceSn', async (req, res) => {
-  try {
-    const { deviceSn } = req.params;
-
-    const data = await solarmanPost('/device/v1.0/currentData', {
-      deviceSn,
-    });
-
-    // Transform to our dashboard format
-    const dataList = data?.dataList || [];
-    const getValue = (key) => {
-      const item = dataList.find(d => d.key === key);
-      return item ? Number(item.value) : null;
-    };
-
-    const transformed = {
-      deviceSn,
-      solarPower: getValue('DPi_t1') || getValue('Ppv') || 0,
-      batteryPower: getValue('Pb_t1') || getValue('Pbat') || 0,
-      gridPower: getValue('Pg_t1') || getValue('Pgrid') || 0,
-      loadPower: getValue('Pl_t1') || getValue('Pload') || 0,
-      batterySoc: getValue('SOC_t1') || getValue('SOC') || 0,
-      batteryVoltage: getValue('Vb_t1') || getValue('Vbat') || 0,
-      dailyProduction: getValue('Etdy_ge1') || getValue('E_today') || 0,
-      totalProduction: getValue('Et_ge0') || getValue('E_total') || 0,
-      _raw: data,
-    };
-
-    res.json(transformed);
-  } catch (err) {
-    console.error('[EG4] inverter error:', err.response?.data || err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Get historical data for charts
-router.get('/history/:deviceSn', async (req, res) => {
-  try {
-    const { deviceSn } = req.params;
-    const { startTime, endTime, timeType = '1' } = req.query; // timeType 1=day, 2=month, 3=year
-
-    const now = new Date();
-    const data = await solarmanPost('/device/v1.0/historical', {
-      deviceSn,
-      startTime: startTime || new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      endTime: endTime || now.toISOString().split('T')[0],
-      timeType: Number(timeType),
-    });
-
-    res.json(data);
-  } catch (err) {
-    console.error('[EG4] history error:', err.response?.data || err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Get battery data
-router.get('/batteries/:deviceSn', async (req, res) => {
-  try {
-    const { deviceSn } = req.params;
-
-    const data = await solarmanPost('/device/v1.0/currentData', {
-      deviceSn,
-    });
-
-    const dataList = data?.dataList || [];
-    const batteries = [];
-
-    // EG4 12000XP supports multiple battery banks
-    // Try to extract individual battery data from the data list
-    for (let i = 1; i <= 8; i++) {
-      const soc = dataList.find(d => d.key === `B${i}_SOC` || d.key === `bat${i}_soc`);
-      const voltage = dataList.find(d => d.key === `B${i}_V` || d.key === `bat${i}_voltage`);
-      const current = dataList.find(d => d.key === `B${i}_I` || d.key === `bat${i}_current`);
-      const temp = dataList.find(d => d.key === `B${i}_T` || d.key === `bat${i}_temp`);
-
-      if (soc || voltage) {
-        batteries.push({
-          bank: i,
-          soc: soc ? Number(soc.value) : null,
-          voltage: voltage ? Number(voltage.value) : null,
-          current: current ? Number(current.value) : null,
-          temp: temp ? Number(temp.value) : null,
-        });
-      }
-    }
-
-    // If no individual battery data, try aggregate
-    if (batteries.length === 0) {
-      const aggSoc = dataList.find(d => d.key?.includes('SOC'));
-      const aggV = dataList.find(d => d.key?.includes('Vbat') || d.key?.includes('Vb'));
-      if (aggSoc) {
-        batteries.push({
-          bank: 1,
-          soc: Number(aggSoc.value),
-          voltage: aggV ? Number(aggV.value) : null,
-          current: null,
-          temp: null,
-        });
-      }
-    }
-
-    res.json({ batteries, _raw: data });
-  } catch (err) {
-    console.error('[EG4] batteries error:', err.response?.data || err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Helper: extract a numeric value from a SolarMan dataList by trying multiple key names
-function extractValue(dataList, ...keys) {
-  if (!dataList) return 0;
-  for (const key of keys) {
-    const exact = dataList.find(d => d.key === key);
-    if (exact) return Number(exact.value) || 0;
-  }
-  for (const key of keys) {
-    const partial = dataList.find(d => d.key?.includes(key));
-    if (partial) return Number(partial.value) || 0;
   }
   return 0;
 }
 
-// Pre-parse a dataList into a dashboard-friendly inverter object
-function parseInverterData(deviceSn, deviceName, connectStatus, dataList) {
+function parseRuntime(obj = {}) {
   return {
-    deviceSn,
-    deviceName,
-    connectStatus,
-    solarPower: extractValue(dataList, 'DPi_t1', 'Ppv_t1', 'APo_t1'),
-    batteryPower: extractValue(dataList, 'Pb_t1', 'Pbat'),
-    gridPower: extractValue(dataList, 'Pg_t1', 'Pgrid', 'PG_Pt1'),
-    loadPower: extractValue(dataList, 'Pl_t1', 'Pload', 'CT_Pt1'),
-    batterySOC: extractValue(dataList, 'SOC_t1', 'SOC', 'B_SOC1'),
-    batteryVoltage: extractValue(dataList, 'Vb_t1', 'Vbat', 'B_V1'),
-    pvVoltage: extractValue(dataList, 'Vpv1', 'PV1_V1', 'Upv1'),
-    pvCurrent: extractValue(dataList, 'Ipv1', 'PV1_I1'),
-    mppt1Power: extractValue(dataList, 'Ppv1', 'PV1_P1'),
-    mppt2Power: extractValue(dataList, 'Ppv2', 'PV2_P1'),
-    dailyProduction: extractValue(dataList, 'Etdy_ge1', 'Eday_ge1', 'E_today'),
-    totalProduction: extractValue(dataList, 'Et_ge0', 'Et_ge1', 'E_total'),
-    batteryTemp: extractValue(dataList, 'Tb_t1', 'T_BMS1', 'bat_temp'),
-    dataList,
+    solarPower:     pick(obj, 'pvPower',   'pv1Power',  'totalPvPower', 'solarPower',  'ppv', 'PPV'),
+    loadPower:      pick(obj, 'loadPower', 'homeLoad',  'consumePower', 'homePower',   'pLoadPower'),
+    batteryPower:   pick(obj, 'batPower',  'storagePower','batteryPower','pBatPower',  'Pbat'),
+    gridPower:      pick(obj, 'pGridPower','gridPower', 'meterPower',   'pGrid',       'Pgrid'),
+    batterySOC:     pick(obj, 'soc',       'batCapacity','SOC',         'batSoc',      'capacity', 'socText'),
+    batteryVoltage: pick(obj, 'vBat',      'batVoltage','Vbat'),
+    pvVoltage:      pick(obj, 'vpv1',      'pv1Voltage','Vpv1'),
+    temperature:    pick(obj, 'tInv',      'temperature','inverterTemp'),
   };
 }
 
-// Full system overview — combines plants + devices + real-time data
-router.get('/system', async (_req, res) => {
-  try {
-    // Get plants
-    const plantData = await solarmanPost('/station/v1.0/list', { page: 1, size: 20 });
-    const stations = plantData?.stationList || [];
+function parseEnergy(obj = {}) {
+  return {
+    dailyProduction: pick(obj, 'eToday','todayEnergy','eDay','dailyEnergy','todayYield','epvToday'),
+    totalProduction: pick(obj, 'eTotal','totalEnergy','lifeTimeEnergy','totalYield'),
+    dailyLoad:       pick(obj, 'eTodayLoad','todayLoadEnergy','loadEnergyToday'),
+    dailyGridBuy:    pick(obj, 'eBuyToday','eTodayGrid','gridBuyToday'),
+  };
+}
 
-    if (stations.length === 0) {
-      return res.status(404).json({ error: 'No stations found in EG4 account' });
-    }
+// ── Per-inverter data fetch ───────────────────────────────────────────────────
 
-    // Get devices for first station
-    const deviceData = await solarmanPost('/station/v1.0/device', {
-      stationId: stations[0].id,
-      page: 1,
-      size: 20,
-    });
-    const devices = deviceData?.deviceListItems || [];
+async function fetchInverterData(inv) {
+  const [rtData, enData] = await Promise.all([
+    portalPost('/WManage/web/inverter/getRuntimeInfo', { serialNum: inv.serialNum }),
+    portalPost('/WManage/web/inverter/getEnergy',      { serialNum: inv.serialNum }),
+  ]);
 
-    // Accept any device with a serial number that isn't purely a data logger
-    const inverterDevices = devices.filter(d =>
-      d.deviceSn && d.deviceType !== 'COLLECTOR' && d.deviceType !== 2
-    );
+  const rt = parseRuntime(rtData?.obj || rtData);
+  const en = parseEnergy(enData?.obj || enData);
 
-    console.log(`[EG4] Found ${inverterDevices.length} inverter device(s):`,
-      inverterDevices.map(d => `${d.deviceSn} (type=${d.deviceType})`).join(', '));
+  return {
+    serialNum:    inv.serialNum,
+    deviceName:   inv.name,
+    connectStatus: (rt.solarPower || rt.loadPower) ? 1 : 0, // online if any live data
+    ...rt,
+    ...en,
+    _rtRaw: rtData,
+    _enRaw: enData,
+  };
+}
 
-    const inverters = await Promise.all(
-      inverterDevices.map(async (device) => {
-        try {
-          const rtData = await solarmanPost('/device/v1.0/currentData', {
-            deviceSn: device.deviceSn,
-          });
+// ── Routes ────────────────────────────────────────────────────────────────────
 
-          const name = device.customName || device.deviceName || device.deviceSn;
-          console.log(`[EG4] ${device.deviceSn} (${name}): ${(rtData?.dataList || []).length} data points`);
-
-          return parseInverterData(
-            device.deviceSn,
-            name,
-            device.connectStatus,
-            rtData?.dataList || [],
-          );
-        } catch (err) {
-          console.error(`[EG4] Failed to get data for ${device.deviceSn}:`, err.message);
-          return {
-            deviceSn: device.deviceSn,
-            deviceName: device.customName || device.deviceName || device.deviceSn,
-            connectStatus: device.connectStatus,
-            error: err.message,
-          };
-        }
-      })
-    );
-
-    res.json({
-      station: stations[0],
-      devices,
-      inverters,
-    });
-  } catch (err) {
-    console.error('[EG4] system error:', err.response?.data || err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Combined real-time stats + daily max PV — the primary endpoint for the dashboard
+// Primary dashboard endpoint
 router.get('/daily-stats', async (_req, res) => {
   try {
-    const plantData = await solarmanPost('/station/v1.0/list', { page: 1, size: 20 });
-    const stations = plantData?.stationList || [];
+    await getSession();
 
-    if (stations.length === 0) {
-      return res.status(503).json({ error: 'No stations found in EG4 account' });
+    if (_inverters.length === 0) {
+      return res.status(503).json({
+        error: 'No inverters found. Login succeeded but no serial numbers were returned. ' +
+               'Add EG4_SERIAL_NUMBERS=SN1,SN2 to your .env file.',
+      });
     }
 
-    const deviceData = await solarmanPost('/station/v1.0/device', {
-      stationId: stations[0].id,
-      page: 1,
-      size: 20,
-    });
-
-    const inverterDevices = (deviceData?.deviceListItems || []).filter(
-      d => d.deviceSn && d.deviceType !== 'COLLECTOR' && d.deviceType !== 2,
-    );
-
-    const inverters = await Promise.all(
-      inverterDevices.map(async (device) => {
-        try {
-          const rtData = await solarmanPost('/device/v1.0/currentData', {
-            deviceSn: device.deviceSn,
-          });
-          const name = device.customName || device.deviceName || device.deviceSn;
-          return parseInverterData(device.deviceSn, name, device.connectStatus, rtData?.dataList || []);
-        } catch (err) {
-          console.error(`[EG4] daily-stats: failed for ${device.deviceSn}:`, err.message);
-          return {
-            deviceSn: device.deviceSn,
-            deviceName: device.customName || device.deviceName || device.deviceSn,
-            connectStatus: device.connectStatus,
-            error: err.message,
-          };
-        }
-      }),
-    );
+    const inverters = await Promise.all(_inverters.map(fetchInverterData));
 
     const combined = {
       solarPower:      inverters.reduce((s, i) => s + (i.solarPower      || 0), 0),
@@ -444,7 +238,6 @@ router.get('/daily-stats', async (_req, res) => {
     updateDailyMax(combined.solarPower);
 
     res.json({
-      station: stations[0],
       inverters,
       combined,
       dailyMaxPV:          _dailyMaxPV,
@@ -452,98 +245,61 @@ router.get('/daily-stats', async (_req, res) => {
       lastUpdated:         new Date().toISOString(),
     });
   } catch (err) {
-    console.error('[EG4] daily-stats error:', err.response?.data || err.message);
+    console.error('[EG4] daily-stats error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ── Diagnostic test endpoint ─────────────────────────────────────────────────
-// Open http://localhost:3001/api/eg4/test in a browser to see what works/fails
+// Diagnostic — visit http://localhost:3001/api/eg4/test in browser
 router.get('/test', async (_req, res) => {
-  const results = {
-    step1_auth: null,
-    step2_stations: null,
-    step3_devices: null,
-    step4_inverterData: null,
+  const result = {
+    step1_login:   null,
+    step2_inverters: null,
+    step3_runtime: null,
+    step4_energy:  null,
   };
 
-  // Step 1: Auth
+  // Step 1: login
   try {
-    sessionToken = null; // Force re-auth
-    tokenExpiry = 0;
-    const token = await getToken();
-    results.step1_auth = { success: true, tokenPreview: token.slice(0, 20) + '...' };
-  } catch (err) {
-    results.step1_auth = { success: false, error: err.message };
-    return res.json(results);
-  }
-
-  // Step 2: List stations
-  try {
-    const data = await solarmanPost('/station/v1.0/list', { page: 1, size: 20 });
-    const stations = data?.stationList || [];
-    results.step2_stations = {
+    _sessionCookie = null;
+    _cookieExpiry  = 0;
+    _inverters     = [];
+    await authenticate();
+    result.step1_login = {
       success: true,
-      count: stations.length,
-      stations: stations.map(s => ({ id: s.id, name: s.name })),
-    };
-    if (stations.length === 0) return res.json(results);
-  } catch (err) {
-    results.step2_stations = { success: false, error: err.response?.data || err.message };
-    return res.json(results);
-  }
-
-  // Step 3: List devices for first station
-  try {
-    const stationId = results.step2_stations.stations[0].id;
-    const data = await solarmanPost('/station/v1.0/device', {
-      stationId: Number(stationId),
-      page: 1,
-      size: 20,
-    });
-    const devices = data?.deviceListItems || [];
-    results.step3_devices = {
-      success: true,
-      count: devices.length,
-      devices: devices.map(d => ({
-        sn: d.deviceSn,
-        name: d.customName || d.deviceName || d.deviceSn,
-        type: d.deviceType,
-        status: d.connectStatus,
-      })),
-    };
-    if (devices.length === 0) return res.json(results);
-  } catch (err) {
-    results.step3_devices = { success: false, error: err.response?.data || err.message };
-    return res.json(results);
-  }
-
-  // Step 4: Get currentData for first device
-  try {
-    const firstDevice = results.step3_devices.devices[0];
-    const data = await solarmanPost('/device/v1.0/currentData', {
-      deviceSn: firstDevice.sn,
-    });
-    const dataList = data?.dataList || [];
-    results.step4_inverterData = {
-      success: true,
-      deviceSn: firstDevice.sn,
-      dataPointCount: dataList.length,
-      // Show first 10 data points so we can see actual key names
-      sampleData: dataList.slice(0, 10).map(d => ({
-        key: d.key,
-        value: d.value,
-        unit: d.unit,
-        name: d.name,
-      })),
-      // Show all key names so we can match them
-      allKeys: dataList.map(d => d.key),
+      cookiePreview: (_sessionCookie || '').slice(0, 60) || '(no cookie — server may use IP sessions)',
     };
   } catch (err) {
-    results.step4_inverterData = { success: false, error: err.response?.data || err.message };
+    result.step1_login = { success: false, error: err.message };
+    return res.json(result);
   }
 
-  res.json(results);
+  // Step 2: inverter list
+  result.step2_inverters = { success: true, inverters: _inverters };
+  if (_inverters.length === 0) {
+    result.step2_inverters.warning = 'No inverters found in login response. Set EG4_SERIAL_NUMBERS in .env.';
+    return res.json(result);
+  }
+
+  const firstSn = _inverters[0].serialNum;
+
+  // Step 3: runtime info
+  try {
+    const data = await portalPost('/WManage/web/inverter/getRuntimeInfo', { serialNum: firstSn });
+    result.step3_runtime = { success: true, raw: data, parsed: parseRuntime(data?.obj || data) };
+  } catch (err) {
+    result.step3_runtime = { success: false, error: err.message };
+  }
+
+  // Step 4: energy data
+  try {
+    const data = await portalPost('/WManage/web/inverter/getEnergy', { serialNum: firstSn });
+    result.step4_energy = { success: true, raw: data, parsed: parseEnergy(data?.obj || data) };
+  } catch (err) {
+    result.step4_energy = { success: false, error: err.message };
+  }
+
+  res.json(result);
 });
 
 export { router as eg4Router };
