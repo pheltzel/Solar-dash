@@ -18,7 +18,7 @@ app.get('/api/health', (_req, res) => {
     services: {
       ecobee: !!process.env.ECOBEE_API_KEY,
       emporia: !!process.env.EMPORIA_EMAIL,
-      eg4: !!process.env.EG4_EMAIL,
+      eg4: !!(process.env.EG4_USERNAME || process.env.EG4_EMAIL),
     },
   });
 });
@@ -44,6 +44,7 @@ app.listen(PORT, () => {
     console.log('  Ecobee:  ✗ NOT CONFIGURED');
   }
   console.log(`  Emporia: ${process.env.EMPORIA_EMAIL ? '✓ ' + process.env.EMPORIA_EMAIL : '✗ NOT CONFIGURED'}`);
-  console.log(`  EG4:     ${process.env.EG4_EMAIL ? '✓ ' + process.env.EG4_EMAIL : '✗ NOT CONFIGURED'}`);
+  const eg4User = process.env.EG4_USERNAME || process.env.EG4_EMAIL;
+  console.log(`  EG4:     ${eg4User ? '✓ ' + eg4User : '✗ NOT CONFIGURED (set EG4_USERNAME or EG4_EMAIL)'}`);
   console.log('─────────────────────────────────────────\n');
 });

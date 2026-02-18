@@ -37,11 +37,12 @@ function updateDailyMax(combinedSolarWatts) {
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
 async function authenticate() {
-  const email = process.env.EG4_EMAIL;
+  // Accept either EG4_USERNAME (plain username) or EG4_EMAIL (email address)
+  const username = process.env.EG4_USERNAME || process.env.EG4_EMAIL;
   const password = process.env.EG4_PASSWORD;
 
-  if (!email || !password) {
-    throw new Error('EG4 credentials not configured. Set EG4_EMAIL and EG4_PASSWORD in .env');
+  if (!username || !password) {
+    throw new Error('EG4 credentials not configured. Set EG4_USERNAME (or EG4_EMAIL) and EG4_PASSWORD in .env');
   }
 
   // SolarMan Open API authentication
@@ -51,7 +52,7 @@ async function authenticate() {
   try {
     const { data } = await axios.post(`${SOLARMAN_API}/account/v1.0/token`, {
       appSecret: 'apitest',
-      email,
+      username,   // SolarMan accepts username or email in this field
       password: hashedPassword,
     }, {
       params: { appId: '202009101423', language: 'en' },
@@ -71,7 +72,8 @@ async function authenticate() {
   // Fallback: Try the direct EG4 portal login
   try {
     const { data, headers } = await axios.post(`${BASE_URL}/api/v1/login`, {
-      email,
+      username,   // try username field
+      email: username,   // some portals expect email field
       password,
       isRemember: true,
     }, {
