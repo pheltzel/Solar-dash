@@ -73,7 +73,10 @@ async function authenticate() {
   const res = await axios.post(`${BASE_URL}/WManage/web/login`, body, {
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
-      Accept: 'application/json',
+      Accept: 'application/json, text/plain, */*',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      Referer: `${BASE_URL}/WManage/web/login`,
+      Origin: BASE_URL,
     },
     validateStatus: () => true, // handle status codes manually
   });
@@ -116,7 +119,10 @@ async function authenticate() {
         const dr = await axios.post(`${BASE_URL}${path}`, '', {
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
-            Accept: 'application/json',
+            Accept: 'application/json, text/plain, */*',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            Referer: `${BASE_URL}/WManage/web/login`,
+            Origin: BASE_URL,
             ...(cookie ? { Cookie: cookie } : {}),
           },
           validateStatus: () => true,
@@ -164,7 +170,10 @@ async function portalPost(path, params = {}) {
   const body   = new URLSearchParams(params).toString();
   const headers = {
     'Content-Type': 'application/x-www-form-urlencoded',
-    Accept: 'application/json',
+    Accept: 'application/json, text/plain, */*',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    Referer: `${BASE_URL}/WManage/web/login`,
+    Origin: BASE_URL,
     ...(cookie ? { Cookie: cookie } : {}),
   };
 
