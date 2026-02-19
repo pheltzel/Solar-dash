@@ -30,7 +30,7 @@ function ErrorState({ error }) {
           <p className="text-xs font-mono text-red-400 break-all">{error}</p>
         </div>
         <p className="text-slate-500 text-xs">
-          Confirm <code className="text-slate-400">EG4_EMAIL</code> and{' '}
+          Confirm <code className="text-slate-400">EG4_USERNAME</code> and{' '}
           <code className="text-slate-400">EG4_PASSWORD</code> are set in your{' '}
           <code className="text-slate-400">.env</code> file and the server is running on port 3001.
         </p>

@@ -7,7 +7,15 @@ const BASE_URL = 'https://monitor.eg4electronics.com';
 // ── Session state ─────────────────────────────────────────────────────────────
 let _sessionCookie = null;
 let _cookieExpiry  = 0;
-let _inverters     = []; // [{ serialNum, name }]
+
+// Pre-populate inverters from EG4_SERIAL_NUMBERS so they're available even if
+// the login response doesn't embed them and discovery endpoints fail.
+function loadEnvSerials() {
+  const raw = process.env.EG4_SERIAL_NUMBERS || '';
+  if (!raw.trim()) return [];
+  return raw.split(',').map(s => ({ serialNum: s.trim(), name: s.trim() })).filter(i => i.serialNum);
+}
+let _inverters = loadEnvSerials(); // [{ serialNum, name }]
 
 // ── Daily max PV tracking ─────────────────────────────────────────────────────
 let _dailyMaxPV          = 0;
@@ -101,11 +109,14 @@ async function authenticate() {
     _sessionCookie = ''; // Proceed anyway — server may use IP-based sessions
   }
 
-  // Parse inverters from the login payload
-  _inverters = extractInvertersFromLoginResponse(res.data);
+  // Parse inverters from the login payload (only overwrite if found)
+  const fromLogin = extractInvertersFromLoginResponse(res.data);
+  if (fromLogin.length > 0) {
+    _inverters = fromLogin;
+  }
 
   // Auto-discover inverters via portal endpoints if login payload was empty
-  if (_inverters.length === 0) {
+  if (fromLogin.length === 0) {
     const cookie = _sessionCookie;
     const discoveryEndpoints = [
       '/WManage/web/plant/getPlatList',

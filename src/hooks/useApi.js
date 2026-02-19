@@ -15,7 +15,12 @@ export function useApi(url, { interval = 30_000, enabled = true } = {}) {
     try {
       const res = await fetch(url);
       if (!res.ok) {
-        throw new Error(`${res.status} ${res.statusText}`);
+        let msg = `${res.status} ${res.statusText}`;
+        try {
+          const json = await res.json();
+          if (json?.error) msg = json.error;
+        } catch (_) { /* keep HTTP status as message */ }
+        throw new Error(msg);
       }
       const json = await res.json();
       setData(json);

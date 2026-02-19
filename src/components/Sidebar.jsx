@@ -94,7 +94,7 @@ export default function Sidebar({ activeTab, onTabChange }) {
           <p className="text-xs text-slate-600 mt-1 leading-relaxed">
             {eg4Ok
               ? 'Live data · refreshes every 30 s'
-              : 'Set EG4_EMAIL + EG4_PASSWORD in .env'}
+              : 'Set EG4_USERNAME + EG4_PASSWORD in .env'}
           </p>
         </div>
       </div>
