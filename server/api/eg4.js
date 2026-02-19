@@ -101,6 +101,40 @@ async function authenticate() {
   // Parse inverters from the login payload
   _inverters = extractInvertersFromLoginResponse(res.data);
 
+  // Auto-discover inverters via portal endpoints if login payload was empty
+  if (_inverters.length === 0) {
+    const cookie = _sessionCookie;
+    const discoveryEndpoints = [
+      '/WManage/web/plant/getPlatList',
+      '/WManage/web/manage/getPlantList',
+      '/WManage/web/config/getPlantDeviceList',
+      '/WManage/web/inverter/getInverterList',
+      '/WManage/web/monitor/getPlantList',
+    ];
+    for (const path of discoveryEndpoints) {
+      try {
+        const dr = await axios.post(`${BASE_URL}${path}`, '', {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            Accept: 'application/json',
+            ...(cookie ? { Cookie: cookie } : {}),
+          },
+          validateStatus: () => true,
+          timeout: 8000,
+        });
+        if (dr.status === 200 && dr.data) {
+          console.log(`[EG4] Discovery ${path}: ${JSON.stringify(dr.data).slice(0, 300)}`);
+          const found = extractInvertersFromLoginResponse(dr.data);
+          if (found.length > 0) {
+            _inverters = found;
+            console.log(`[EG4] Inverters discovered via ${path}: ${_inverters.map(i => i.serialNum).join(', ')}`);
+            break;
+          }
+        }
+      } catch (_e) { /* try next */ }
+    }
+  }
+
   // Fallback: explicit serial numbers from .env
   if (_inverters.length === 0) {
     const envSerials = process.env.EG4_SERIAL_NUMBERS || '';
@@ -108,7 +142,7 @@ async function authenticate() {
       _inverters = envSerials.split(',').map(s => ({ serialNum: s.trim(), name: s.trim() }));
       console.log(`[EG4] Using EG4_SERIAL_NUMBERS from env: ${_inverters.map(i => i.serialNum).join(', ')}`);
     } else {
-      console.warn('[EG4] No inverters found in login response. Add EG4_SERIAL_NUMBERS=SN1,SN2 to .env if needed.');
+      console.warn('[EG4] No inverters found via login or discovery. Add EG4_SERIAL_NUMBERS=SN1,SN2 to .env');
     }
   } else {
     console.log(`[EG4] Inverters found: ${_inverters.map(i => `${i.serialNum}(${i.name})`).join(', ')}`);
@@ -253,31 +287,33 @@ router.get('/daily-stats', async (_req, res) => {
 // Diagnostic — visit http://localhost:3001/api/eg4/test in browser
 router.get('/test', async (_req, res) => {
   const result = {
-    step1_login:   null,
-    step2_inverters: null,
-    step3_runtime: null,
-    step4_energy:  null,
+    step1_auth:        null,
+    step2_inverters:   null,
+    step3_runtimeInfo: null,
+    step4_energy:      null,
   };
 
-  // Step 1: login
+  // Step 1: login + auto-discovery
   try {
     _sessionCookie = null;
     _cookieExpiry  = 0;
     _inverters     = [];
     await authenticate();
-    result.step1_login = {
+    result.step1_auth = {
       success: true,
       cookiePreview: (_sessionCookie || '').slice(0, 60) || '(no cookie — server may use IP sessions)',
     };
   } catch (err) {
-    result.step1_login = { success: false, error: err.message };
+    result.step1_auth = { success: false, error: err.message };
     return res.json(result);
   }
 
-  // Step 2: inverter list
+  // Step 2: inverter list (populated by authenticate + discovery)
   result.step2_inverters = { success: true, inverters: _inverters };
   if (_inverters.length === 0) {
-    result.step2_inverters.warning = 'No inverters found in login response. Set EG4_SERIAL_NUMBERS in .env.';
+    result.step2_inverters.warning =
+      'No inverters found via login or discovery endpoints. ' +
+      'Add EG4_SERIAL_NUMBERS=SN1,SN2 to your .env file.';
     return res.json(result);
   }
 
@@ -286,9 +322,9 @@ router.get('/test', async (_req, res) => {
   // Step 3: runtime info
   try {
     const data = await portalPost('/WManage/web/inverter/getRuntimeInfo', { serialNum: firstSn });
-    result.step3_runtime = { success: true, raw: data, parsed: parseRuntime(data?.obj || data) };
+    result.step3_runtimeInfo = { success: true, raw: data, parsed: parseRuntime(data?.obj || data) };
   } catch (err) {
-    result.step3_runtime = { success: false, error: err.message };
+    result.step3_runtimeInfo = { success: false, error: err.message };
   }
 
   // Step 4: energy data
